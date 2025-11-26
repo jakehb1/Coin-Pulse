@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react';
 
 const COINGECKO_API = 'https://api.coingecko.com/api/v3';
 const DEXSCREENER_API = 'https://api.dexscreener.com';
+const POLYMARKET_API = 'https://gamma-api.polymarket.com';
 
 const FALLBACK_COINS = [
   { id: 'bitcoin', symbol: 'btc', name: 'Bitcoin', current_price: 97500, price_change_percentage_24h: 2.5, price_change_percentage_7d_in_currency: 8.2, market_cap: 1920000000000, total_volume: 45000000000, market_cap_rank: 1, image: 'https://assets.coingecko.com/coins/images/1/small/bitcoin.png' },
@@ -15,7 +16,7 @@ const FALLBACK_COINS = [
 ];
 
 const FALLBACK_MEMES = [
-  { id: 'doge', symbol: 'DOGE', name: 'Dogecoin', price: 0.38, priceChange24h: 5.5, marketCap: 56000000000, volume24h: 4200000000, image: 'https://assets.coingecko.com/coins/images/5/small/dogecoin.png', chain: 'multi', dexUrl: 'https://dexscreener.com/ethereum/0x4206931337dc273a630d328da6441786bfad668f' },
+  { id: 'doge', symbol: 'DOGE', name: 'Dogecoin', price: 0.38, priceChange24h: 5.5, marketCap: 56000000000, volume24h: 4200000000, image: 'https://assets.coingecko.com/coins/images/5/small/dogecoin.png', chain: 'multi' },
   { id: 'shib', symbol: 'SHIB', name: 'Shiba Inu', price: 0.0000245, priceChange24h: 6.2, marketCap: 14500000000, volume24h: 1800000000, image: 'https://assets.coingecko.com/coins/images/11939/small/shiba.png', chain: 'ethereum' },
   { id: 'pepe', symbol: 'PEPE', name: 'Pepe', price: 0.0000195, priceChange24h: 8.5, marketCap: 8200000000, volume24h: 2100000000, image: 'https://assets.coingecko.com/coins/images/29850/small/pepe-token.jpeg', chain: 'ethereum' },
   { id: 'bonk', symbol: 'BONK', name: 'Bonk', price: 0.0000385, priceChange24h: 12.5, marketCap: 2900000000, volume24h: 980000000, image: 'https://assets.coingecko.com/coins/images/28600/small/bonk.jpg', chain: 'solana' },
@@ -23,13 +24,21 @@ const FALLBACK_MEMES = [
   { id: 'floki', symbol: 'FLOKI', name: 'FLOKI', price: 0.000185, priceChange24h: 7.8, marketCap: 1780000000, volume24h: 420000000, image: 'https://assets.coingecko.com/coins/images/16746/small/PNG_image.png', chain: 'ethereum' },
   { id: 'brett', symbol: 'BRETT', name: 'Brett', price: 0.165, priceChange24h: 18.5, marketCap: 1650000000, volume24h: 380000000, image: 'https://assets.coingecko.com/coins/images/35529/small/brett.png', chain: 'base' },
   { id: 'popcat', symbol: 'POPCAT', name: 'Popcat', price: 1.42, priceChange24h: 22.8, marketCap: 1380000000, volume24h: 520000000, image: 'https://assets.coingecko.com/coins/images/33760/small/popcat.png', chain: 'solana' },
-  { id: 'mog', symbol: 'MOG', name: 'Mog Coin', price: 0.0000028, priceChange24h: 14.2, marketCap: 1100000000, volume24h: 85000000, image: 'https://assets.coingecko.com/coins/images/31226/small/mog.png', chain: 'ethereum' },
   { id: 'giga', symbol: 'GIGA', name: 'GIGACHAD', price: 0.058, priceChange24h: 25.8, marketCap: 580000000, volume24h: 95000000, chain: 'solana', isPumpFun: true },
   { id: 'goat', symbol: 'GOAT', name: 'Goatseus Maximus', price: 0.72, priceChange24h: 28.5, marketCap: 720000000, volume24h: 280000000, chain: 'solana', isPumpFun: true },
   { id: 'pnut', symbol: 'PNUT', name: 'Peanut the Squirrel', price: 1.25, priceChange24h: 65.2, marketCap: 1250000000, volume24h: 890000000, chain: 'solana', isPumpFun: true },
-  { id: 'fartcoin', symbol: 'FARTCOIN', name: 'Fartcoin', price: 0.85, priceChange24h: 38.5, marketCap: 850000000, volume24h: 420000000, chain: 'solana', isPumpFun: true },
-  { id: 'act', symbol: 'ACT', name: 'Act I: The AI Prophecy', price: 0.45, priceChange24h: 42.5, marketCap: 420000000, volume24h: 380000000, chain: 'solana', isPumpFun: true },
   { id: 'ai16z', symbol: 'AI16Z', name: 'ai16z', price: 0.95, priceChange24h: 55.2, marketCap: 950000000, volume24h: 520000000, chain: 'solana', isPumpFun: true },
+];
+
+const FALLBACK_MARKETS = [
+  { id: '1', question: 'Will Bitcoin reach $150k by end of 2025?', outcomePrices: '0.42,0.58', volume: 12500000, liquidity: 850000, category: 'Crypto', image: '', endDate: '2025-12-31' },
+  { id: '2', question: 'Will the Fed cut rates in December 2025?', outcomePrices: '0.65,0.35', volume: 8200000, liquidity: 620000, category: 'Economics', image: '', endDate: '2025-12-18' },
+  { id: '3', question: 'Will there be a US recession in 2025?', outcomePrices: '0.28,0.72', volume: 5600000, liquidity: 420000, category: 'Economics', image: '', endDate: '2025-12-31' },
+  { id: '4', question: 'Will Ethereum flip Bitcoin market cap?', outcomePrices: '0.08,0.92', volume: 3200000, liquidity: 280000, category: 'Crypto', image: '', endDate: '2025-12-31' },
+  { id: '5', question: 'Will SpaceX launch Starship to Mars in 2025?', outcomePrices: '0.15,0.85', volume: 4100000, liquidity: 350000, category: 'Science', image: '', endDate: '2025-12-31' },
+  { id: '6', question: 'Will AI pass medical licensing exam?', outcomePrices: '0.72,0.28', volume: 2800000, liquidity: 210000, category: 'AI', image: '', endDate: '2025-12-31' },
+  { id: '7', question: 'Will Solana reach $500 in 2025?', outcomePrices: '0.22,0.78', volume: 6400000, liquidity: 480000, category: 'Crypto', image: '', endDate: '2025-12-31' },
+  { id: '8', question: 'Will Apple release AR glasses in 2025?', outcomePrices: '0.35,0.65', volume: 1900000, liquidity: 150000, category: 'Tech', image: '', endDate: '2025-12-31' },
 ];
 
 const seededRandom = (seed) => { const x = Math.sin(seed) * 10000; return x - Math.floor(x); };
@@ -81,8 +90,28 @@ const processDexScreenerPair = (pair, index) => ({
   chain: pair.chainId || 'solana',
   dexUrl: pair.url || `https://dexscreener.com/${pair.chainId}/${pair.pairAddress}`,
   isPumpFun: pair.dexId === 'pumpfun' || (pair.url || '').includes('pump'),
-  liquidity: parseFloat(pair.liquidity?.usd || 0),
 });
+
+const processPolymarketData = (market) => {
+  const prices = (market.outcomePrices || '0.5,0.5').split(',').map(p => parseFloat(p));
+  const yesPrice = prices[0] || 0.5;
+  const noPrice = prices[1] || 0.5;
+  return {
+    id: market.id || market.conditionId,
+    question: market.question || 'Unknown Market',
+    yesPrice: yesPrice,
+    noPrice: noPrice,
+    yesPct: Math.round(yesPrice * 100),
+    noPct: Math.round(noPrice * 100),
+    volume: parseFloat(market.volume || market.volumeNum || 0),
+    liquidity: parseFloat(market.liquidity || market.liquidityNum || 0),
+    category: market.category || market.groupItemTitle || 'General',
+    image: market.image || '',
+    endDate: market.endDate || market.endDateIso || '',
+    slug: market.slug || '',
+    active: market.active !== false && market.closed !== true,
+  };
+};
 
 const formatPrice = (p) => p === 0 ? '$0' : p < 0.00001 ? `$${p.toExponential(2)}` : p < 0.001 ? `$${p.toFixed(8)}` : p < 1 ? `$${p.toFixed(6)}` : p < 1000 ? `$${p.toFixed(2)}` : `$${p.toLocaleString(undefined, {maximumFractionDigits: 2})}`;
 const formatLargeNumber = (n) => !n ? '-' : n >= 1e9 ? `$${(n/1e9).toFixed(2)}B` : n >= 1e6 ? `$${(n/1e6).toFixed(2)}M` : n >= 1e3 ? `$${(n/1e3).toFixed(1)}K` : `$${n.toFixed(0)}`;
@@ -91,6 +120,47 @@ const formatPercent = (n) => n == null ? '-' : `${n >= 0 ? '+' : ''}${Math.abs(n
 const getViralLabel = (s) => s >= 80 ? { label: '🔥 VIRAL', color: '#dc2626', bg: '#fef2f2' } : s >= 60 ? { label: '🚀 HOT', color: '#f97316', bg: '#fff7ed' } : s >= 40 ? { label: '📈 Rising', color: '#eab308', bg: '#fefce8' } : s >= 20 ? { label: '👀 Watch', color: '#22c55e', bg: '#f0fdf4' } : { label: '💤 Quiet', color: '#737373', bg: '#f5f5f5' };
 const getSignalLabel = (s) => s >= 80 ? { label: 'Strong Buy', color: '#16a34a', bg: '#dcfce7' } : s >= 60 ? { label: 'Buy', color: '#22c55e', bg: '#f0fdf4' } : s >= 40 ? { label: 'Neutral', color: '#737373', bg: '#f5f5f5' } : { label: 'Caution', color: '#f97316', bg: '#fff7ed' };
 const getChainBadge = (c) => ({ solana: { l: 'SOL', c: '#9945FF', b: '#f3e8ff' }, ethereum: { l: 'ETH', c: '#627EEA', b: '#eff6ff' }, base: { l: 'BASE', c: '#0052FF', b: '#eff6ff' }, bsc: { l: 'BSC', c: '#F0B90B', b: '#fefce8' } }[c] || { l: c?.slice(0,4)?.toUpperCase() || '?', c: '#737373', b: '#f5f5f5' });
+
+const getCategoryColor = (cat) => {
+  const colors = {
+    'Crypto': { bg: '#fef3c7', color: '#92400e' },
+    'Politics': { bg: '#dbeafe', color: '#1e40af' },
+    'Economics': { bg: '#dcfce7', color: '#166534' },
+    'Sports': { bg: '#fee2e2', color: '#991b1b' },
+    'Science': { bg: '#f3e8ff', color: '#6b21a8' },
+    'Tech': { bg: '#e0e7ff', color: '#3730a3' },
+    'AI': { bg: '#cffafe', color: '#0e7490' },
+  };
+  return colors[cat] || { bg: '#f5f5f5', color: '#525252' };
+};
+
+const MarketCard = ({ market }) => {
+  const catColor = getCategoryColor(market.category);
+  const polyUrl = market.slug ? `https://polymarket.com/event/${market.slug}` : 'https://polymarket.com';
+  
+  return (
+    <div style={{ backgroundColor: 'white', borderRadius: '12px', border: '1px solid #e5e5e5', padding: '16px', cursor: 'pointer', transition: 'all 0.15s' }} onClick={() => window.open(polyUrl, '_blank')}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '12px' }}>
+        <span style={{ backgroundColor: catColor.bg, color: catColor.color, padding: '3px 8px', borderRadius: '4px', fontSize: '10px', fontWeight: '600', textTransform: 'uppercase' }}>{market.category}</span>
+        <span style={{ fontSize: '10px', color: '#a3a3a3' }}>{market.endDate ? new Date(market.endDate).toLocaleDateString() : ''}</span>
+      </div>
+      <h3 style={{ fontSize: '14px', fontWeight: '600', color: '#171717', margin: '0 0 14px', lineHeight: '1.4' }}>{market.question}</h3>
+      <div style={{ marginBottom: '12px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+          <span style={{ fontSize: '13px', fontWeight: '600', color: '#16a34a' }}>Yes {market.yesPct}%</span>
+          <span style={{ fontSize: '13px', fontWeight: '600', color: '#dc2626' }}>No {market.noPct}%</span>
+        </div>
+        <div style={{ height: '8px', backgroundColor: '#fee2e2', borderRadius: '4px', overflow: 'hidden' }}>
+          <div style={{ height: '100%', width: `${market.yesPct}%`, backgroundColor: '#16a34a', borderRadius: '4px', transition: 'width 0.3s' }} />
+        </div>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#737373' }}>
+        <span>Vol: {formatLargeNumber(market.volume)}</span>
+        <span>Liq: {formatLargeNumber(market.liquidity)}</span>
+      </div>
+    </div>
+  );
+};
 
 const CoinModal = ({ coin, onClose }) => {
   const signal = getSignalLabel(coin.signalScore);
@@ -116,8 +186,6 @@ const CoinModal = ({ coin, onClose }) => {
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '20px' }}>
             <div style={{ padding: '10px', border: '1px solid #e5e5e5', borderRadius: '8px' }}><p style={{ fontSize: '10px', color: '#737373', margin: '0 0 2px' }}>Market Cap</p><p style={{ fontSize: '13px', fontWeight: '600', margin: 0 }}>{formatLargeNumber(coin.marketCap)}</p></div>
             <div style={{ padding: '10px', border: '1px solid #e5e5e5', borderRadius: '8px' }}><p style={{ fontSize: '10px', color: '#737373', margin: '0 0 2px' }}>Volume 24h</p><p style={{ fontSize: '13px', fontWeight: '600', margin: 0 }}>{formatLargeNumber(coin.volume24h)}</p></div>
-            <div style={{ padding: '10px', border: '1px solid #e5e5e5', borderRadius: '8px' }}><p style={{ fontSize: '10px', color: '#737373', margin: '0 0 2px' }}>X Mentions</p><p style={{ fontSize: '13px', fontWeight: '600', margin: 0 }}>{coin.xMentions24h?.toLocaleString()} {coin.xTrending && '🔥'}</p></div>
-            <div style={{ padding: '10px', border: '1px solid #e5e5e5', borderRadius: '8px' }}><p style={{ fontSize: '10px', color: '#737373', margin: '0 0 2px' }}>Net Flow</p><p style={{ fontSize: '13px', fontWeight: '600', color: coin.netFlow >= 0 ? '#16a34a' : '#dc2626', margin: 0 }}>{formatLargeNumber(Math.abs(coin.netFlow))}</p></div>
           </div>
           <div style={{ display: 'flex', gap: '10px' }}>
             {coin.dexUrl && <a href={coin.dexUrl} target="_blank" rel="noopener noreferrer" style={{ flex: 1, padding: '12px', backgroundColor: '#171717', color: 'white', textDecoration: 'none', borderRadius: '10px', textAlign: 'center', fontSize: '13px', fontWeight: '600' }}>DexScreener ↗</a>}
@@ -133,6 +201,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('all');
   const [data, setData] = useState([]);
   const [memeData, setMemeData] = useState([]);
+  const [markets, setMarkets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [sortField, setSortField] = useState('signalScore');
   const [sortDirection, setSortDirection] = useState('desc');
@@ -140,6 +209,8 @@ export default function App() {
   const [selectedCoin, setSelectedCoin] = useState(null);
   const [lastUpdated, setLastUpdated] = useState(new Date());
   const [memeSource, setMemeSource] = useState('loading');
+  const [marketSource, setMarketSource] = useState('loading');
+  const [marketFilter, setMarketFilter] = useState('all');
 
   const fetchCoins = useCallback(async () => {
     try {
@@ -155,7 +226,6 @@ export default function App() {
 
   const fetchTrendingMemes = useCallback(async () => {
     try {
-      // Try DexScreener boosted tokens first (includes pump.fun)
       const boostRes = await fetch(`${DEXSCREENER_API}/token-boosts/top/v1`, { signal: AbortSignal.timeout(10000) });
       if (boostRes.ok) {
         const boosts = await boostRes.json();
@@ -169,15 +239,9 @@ export default function App() {
             } catch { return null; }
           }));
           const valid = pairs.filter(Boolean);
-          if (valid.length > 5) {
-            setMemeData(valid.map(p => generateFlowData(p, true)));
-            setMemeSource('dexscreener');
-            return;
-          }
+          if (valid.length > 5) { setMemeData(valid.map(p => generateFlowData(p, true))); setMemeSource('dexscreener'); return; }
         }
       }
-      
-      // Fallback: CoinGecko meme category
       const cgRes = await fetch(`${COINGECKO_API}/coins/markets?vs_currency=usd&category=meme-token&order=market_cap_desc&per_page=50&page=1&sparkline=false&price_change_percentage=24h,7d`);
       if (cgRes.ok) {
         const coins = await cgRes.json();
@@ -191,8 +255,26 @@ export default function App() {
     }
   }, []);
 
-  useEffect(() => { fetchCoins(); fetchTrendingMemes(); }, [fetchCoins, fetchTrendingMemes]);
-  useEffect(() => { const i = setInterval(() => { fetchCoins(); fetchTrendingMemes(); }, 60000); return () => clearInterval(i); }, [fetchCoins, fetchTrendingMemes]);
+  const fetchMarkets = useCallback(async () => {
+    try {
+      const res = await fetch(`${POLYMARKET_API}/markets?closed=false&limit=50&order=volume24hr&ascending=false`, { signal: AbortSignal.timeout(15000) });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data) && data.length) {
+          setMarkets(data.map(processPolymarketData).filter(m => m.active && m.volume > 0));
+          setMarketSource('polymarket');
+          return;
+        }
+      }
+      throw new Error('API failed');
+    } catch {
+      setMarkets(FALLBACK_MARKETS.map(processPolymarketData));
+      setMarketSource('fallback');
+    }
+  }, []);
+
+  useEffect(() => { fetchCoins(); fetchTrendingMemes(); fetchMarkets(); }, [fetchCoins, fetchTrendingMemes, fetchMarkets]);
+  useEffect(() => { const i = setInterval(() => { fetchCoins(); fetchTrendingMemes(); fetchMarkets(); }, 60000); return () => clearInterval(i); }, [fetchCoins, fetchTrendingMemes, fetchMarkets]);
 
   const currentData = activeTab === 'memes' ? memeData : data;
   const sortedData = useMemo(() => {
@@ -202,71 +284,102 @@ export default function App() {
     return r;
   }, [currentData, searchQuery, sortField, sortDirection]);
 
-  const srcLabel = { dexscreener: '🔥 Live Trending', coingecko: '📊 CoinGecko', fallback: '📋 Demo', loading: '⏳ Loading' };
+  const filteredMarkets = useMemo(() => {
+    let m = [...markets];
+    if (searchQuery.trim()) { const q = searchQuery.toLowerCase(); m = m.filter(market => market.question.toLowerCase().includes(q)); }
+    if (marketFilter !== 'all') { m = m.filter(market => market.category === marketFilter); }
+    return m.sort((a, b) => b.volume - a.volume);
+  }, [markets, searchQuery, marketFilter]);
+
+  const marketCategories = useMemo(() => ['all', ...new Set(markets.map(m => m.category).filter(Boolean))], [markets]);
+
+  const srcLabel = { dexscreener: '🔥 Live Trending', coingecko: '📊 CoinGecko', polymarket: '📈 Live Polymarket', fallback: '📋 Demo', loading: '⏳ Loading' };
 
   return (
     <div style={{ minHeight: '100vh', backgroundColor: '#fafafa', padding: '20px 16px', fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif' }}>
       <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
         <div style={{ textAlign: 'center', marginBottom: '20px' }}>
-          <h1 style={{ fontSize: '22px', fontWeight: '700', color: '#171717', margin: '0 0 6px' }}>{activeTab === 'memes' ? '🐸 Trending Memes' : 'Crypto Flow Tracker'}</h1>
-          <p style={{ fontSize: '12px', color: '#737373', margin: '0 0 8px' }}>{activeTab === 'memes' ? 'Live from DexScreener & pump.fun' : 'Track flows and sentiment'}</p>
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '3px 10px', backgroundColor: memeSource !== 'fallback' ? '#dcfce7' : '#fef3c7', color: memeSource !== 'fallback' ? '#166534' : '#92400e', borderRadius: '10px', fontSize: '11px', fontWeight: '600' }}>
-            <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: memeSource !== 'fallback' ? '#22c55e' : '#f59e0b' }} />
-            {activeTab === 'memes' ? srcLabel[memeSource] : 'Live'} · {lastUpdated.toLocaleTimeString()}
+          <h1 style={{ fontSize: '22px', fontWeight: '700', color: '#171717', margin: '0 0 6px' }}>
+            {activeTab === 'memes' ? '🐸 Trending Memes' : activeTab === 'markets' ? '📊 Prediction Markets' : 'Crypto Flow Tracker'}
+          </h1>
+          <p style={{ fontSize: '12px', color: '#737373', margin: '0 0 8px' }}>
+            {activeTab === 'memes' ? 'Live from DexScreener & pump.fun' : activeTab === 'markets' ? 'Live from Polymarket' : 'Track flows and sentiment'}
+          </p>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '3px 10px', backgroundColor: (activeTab === 'markets' ? marketSource : memeSource) !== 'fallback' ? '#dcfce7' : '#fef3c7', color: (activeTab === 'markets' ? marketSource : memeSource) !== 'fallback' ? '#166534' : '#92400e', borderRadius: '10px', fontSize: '11px', fontWeight: '600' }}>
+            <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: (activeTab === 'markets' ? marketSource : memeSource) !== 'fallback' ? '#22c55e' : '#f59e0b' }} />
+            {activeTab === 'markets' ? srcLabel[marketSource] : activeTab === 'memes' ? srcLabel[memeSource] : 'Live'} · {lastUpdated.toLocaleTimeString()}
           </span>
         </div>
 
-        <div style={{ display: 'flex', justifyContent: 'center', gap: '10px', marginBottom: '16px' }}>
-          <button onClick={() => { setActiveTab('all'); setSortField('signalScore'); }} style={{ padding: '10px 20px', borderRadius: '10px', border: '1px solid #e5e5e5', background: activeTab === 'all' ? '#171717' : 'white', color: activeTab === 'all' ? 'white' : '#525252', fontSize: '14px', cursor: 'pointer', fontWeight: '500' }}>📊 All Coins</button>
-          <button onClick={() => { setActiveTab('memes'); setSortField('viralScore'); }} style={{ padding: '10px 20px', borderRadius: '10px', border: '1px solid #e5e5e5', background: activeTab === 'memes' ? '#171717' : 'white', color: activeTab === 'memes' ? 'white' : '#525252', fontSize: '14px', cursor: 'pointer', fontWeight: '500' }}>🐸 Trending Memes</button>
+        <div style={{ display: 'flex', justifyContent: 'center', gap: '8px', marginBottom: '16px', flexWrap: 'wrap' }}>
+          <button onClick={() => { setActiveTab('all'); setSortField('signalScore'); setSearchQuery(''); }} style={{ padding: '10px 16px', borderRadius: '10px', border: '1px solid #e5e5e5', background: activeTab === 'all' ? '#171717' : 'white', color: activeTab === 'all' ? 'white' : '#525252', fontSize: '13px', cursor: 'pointer', fontWeight: '500' }}>📊 All Coins</button>
+          <button onClick={() => { setActiveTab('memes'); setSortField('viralScore'); setSearchQuery(''); }} style={{ padding: '10px 16px', borderRadius: '10px', border: '1px solid #e5e5e5', background: activeTab === 'memes' ? '#171717' : 'white', color: activeTab === 'memes' ? 'white' : '#525252', fontSize: '13px', cursor: 'pointer', fontWeight: '500' }}>🐸 Memes</button>
+          <button onClick={() => { setActiveTab('markets'); setSearchQuery(''); setMarketFilter('all'); }} style={{ padding: '10px 16px', borderRadius: '10px', border: '1px solid #e5e5e5', background: activeTab === 'markets' ? '#171717' : 'white', color: activeTab === 'markets' ? 'white' : '#525252', fontSize: '13px', cursor: 'pointer', fontWeight: '500' }}>🎯 Markets</button>
         </div>
 
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', gap: '12px', flexWrap: 'wrap' }}>
-          <input type="text" placeholder="Search..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} style={{ padding: '10px 14px', borderRadius: '10px', border: '1px solid #e5e5e5', fontSize: '14px', flex: '1 1 200px', maxWidth: '280px', outline: 'none' }} />
-          <button onClick={() => { fetchCoins(); fetchTrendingMemes(); }} style={{ padding: '10px 16px', borderRadius: '10px', border: '1px solid #e5e5e5', background: 'white', fontSize: '13px', cursor: 'pointer' }}>{loading ? '...' : '↻ Refresh'}</button>
-        </div>
-
-        <div style={{ backgroundColor: 'white', borderRadius: '14px', border: '1px solid #e5e5e5', overflow: 'hidden' }}>
-          {loading && !currentData.length ? <div style={{ padding: '50px', textAlign: 'center', color: '#737373' }}>Loading...</div> : (
-            <div style={{ overflowX: 'auto' }}>
-              <div style={{ minWidth: '850px' }}>
-                <div style={{ display: 'grid', gridTemplateColumns: activeTab === 'memes' ? '45px 2fr 0.7fr 1fr 1fr 1fr 1fr 0.9fr' : '45px 2fr 1fr 1fr 1fr 1fr 1fr 0.9fr', padding: '10px 14px', backgroundColor: '#fafafa', borderBottom: '1px solid #e5e5e5', fontSize: '10px', fontWeight: '600', color: '#737373', textTransform: 'uppercase' }}>
-                  <div>#</div>
-                  <div onClick={() => { setSortField('name'); setSortDirection(d => sortField === 'name' ? (d === 'desc' ? 'asc' : 'desc') : 'desc'); }} style={{ cursor: 'pointer' }}>Token</div>
-                  {activeTab === 'memes' && <div>Chain</div>}
-                  <div onClick={() => { setSortField('price'); setSortDirection(d => sortField === 'price' ? (d === 'desc' ? 'asc' : 'desc') : 'desc'); }} style={{ cursor: 'pointer', textAlign: 'right' }}>Price</div>
-                  <div onClick={() => { setSortField('priceChange24h'); setSortDirection(d => sortField === 'priceChange24h' ? (d === 'desc' ? 'asc' : 'desc') : 'desc'); }} style={{ cursor: 'pointer', textAlign: 'right' }}>24h</div>
-                  {activeTab !== 'memes' && <div onClick={() => { setSortField('netFlow'); setSortDirection(d => sortField === 'netFlow' ? (d === 'desc' ? 'asc' : 'desc') : 'desc'); }} style={{ cursor: 'pointer', textAlign: 'right' }}>Net Flow</div>}
-                  <div onClick={() => { setSortField('volume24h'); setSortDirection(d => sortField === 'volume24h' ? (d === 'desc' ? 'asc' : 'desc') : 'desc'); }} style={{ cursor: 'pointer', textAlign: 'right' }}>Vol</div>
-                  <div onClick={() => { setSortField('marketCap'); setSortDirection(d => sortField === 'marketCap' ? (d === 'desc' ? 'asc' : 'desc') : 'desc'); }} style={{ cursor: 'pointer', textAlign: 'right' }}>MCap</div>
-                  <div onClick={() => { setSortField(activeTab === 'memes' ? 'viralScore' : 'signalScore'); setSortDirection(d => d === 'desc' ? 'asc' : 'desc'); }} style={{ cursor: 'pointer', textAlign: 'center' }}>{activeTab === 'memes' ? 'Viral' : 'Signal'}</div>
-                </div>
-
-                {sortedData.map((t, i) => {
-                  const viral = getViralLabel(t.viralScore);
-                  const signal = getSignalLabel(t.signalScore);
-                  const chain = getChainBadge(t.chain);
-                  return (
-                    <div key={t.id + i} onClick={() => setSelectedCoin(t)} style={{ display: 'grid', gridTemplateColumns: activeTab === 'memes' ? '45px 2fr 0.7fr 1fr 1fr 1fr 1fr 0.9fr' : '45px 2fr 1fr 1fr 1fr 1fr 1fr 0.9fr', padding: '12px 14px', borderBottom: '1px solid #f5f5f5', alignItems: 'center', fontSize: '13px', cursor: 'pointer', transition: 'background 0.1s' }} onMouseEnter={e => e.currentTarget.style.backgroundColor = '#fafafa'} onMouseLeave={e => e.currentTarget.style.backgroundColor = ''}>
-                      <div style={{ color: '#a3a3a3', fontSize: '11px' }}>{i + 1}</div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        {t.image ? <img src={t.image} alt="" style={{ width: '26px', height: '26px', borderRadius: '50%' }} onError={e => e.target.style.display='none'} /> : <div style={{ width: '26px', height: '26px', borderRadius: '50%', backgroundColor: '#f0f0f0', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: '600' }}>{t.symbol?.[0]}</div>}
-                        <div><div style={{ fontWeight: '600', color: '#171717', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '13px' }}>{t.name?.length > 14 ? t.name.slice(0, 14) + '…' : t.name} {t.isPumpFun && <span style={{ fontSize: '8px', padding: '1px 3px', backgroundColor: '#dcfce7', color: '#16a34a', borderRadius: '2px' }}>🎰</span>}</div><div style={{ fontSize: '10px', color: '#a3a3a3' }}>{t.symbol}</div></div>
-                      </div>
-                      {activeTab === 'memes' && <div><span style={{ backgroundColor: chain.b, color: chain.c, padding: '2px 5px', borderRadius: '3px', fontSize: '9px', fontWeight: '600' }}>{chain.l}</span></div>}
-                      <div style={{ textAlign: 'right', fontWeight: '600', fontFamily: 'monospace', fontSize: '12px' }}>{formatPrice(t.price)}</div>
-                      <div style={{ textAlign: 'right', fontWeight: '600', color: t.priceChange24h >= 0 ? '#16a34a' : '#dc2626', fontSize: '12px' }}>{formatPercent(t.priceChange24h)}</div>
-                      {activeTab !== 'memes' && <div style={{ textAlign: 'right', color: t.netFlow >= 0 ? '#16a34a' : '#dc2626', fontSize: '11px' }}>{t.netFlow >= 0 ? '+' : ''}{formatLargeNumber(t.netFlow)}</div>}
-                      <div style={{ textAlign: 'right', fontSize: '11px', color: '#525252' }}>{formatLargeNumber(t.volume24h)}</div>
-                      <div style={{ textAlign: 'right', fontSize: '11px', color: '#525252' }}>{formatLargeNumber(t.marketCap)}</div>
-                      <div style={{ textAlign: 'center' }}>{activeTab === 'memes' ? <span style={{ backgroundColor: viral.bg, color: viral.color, padding: '3px 7px', borderRadius: '4px', fontSize: '10px', fontWeight: '600' }}>{viral.label}</span> : <span style={{ backgroundColor: signal.bg, color: signal.color, padding: '3px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '600' }}>{t.signalScore}</span>}</div>
-                    </div>
-                  );
-                })}
-              </div>
+          <input type="text" placeholder={activeTab === 'markets' ? "Search markets..." : "Search..."} value={searchQuery} onChange={e => setSearchQuery(e.target.value)} style={{ padding: '10px 14px', borderRadius: '10px', border: '1px solid #e5e5e5', fontSize: '14px', flex: '1 1 200px', maxWidth: '280px', outline: 'none' }} />
+          {activeTab === 'markets' && (
+            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+              {marketCategories.map(cat => (
+                <button key={cat} onClick={() => setMarketFilter(cat)} style={{ padding: '6px 12px', borderRadius: '6px', border: '1px solid #e5e5e5', background: marketFilter === cat ? '#171717' : 'white', color: marketFilter === cat ? 'white' : '#525252', fontSize: '11px', cursor: 'pointer', textTransform: 'capitalize' }}>{cat === 'all' ? 'All' : cat}</button>
+              ))}
             </div>
           )}
+          <button onClick={() => { fetchCoins(); fetchTrendingMemes(); fetchMarkets(); }} style={{ padding: '10px 16px', borderRadius: '10px', border: '1px solid #e5e5e5', background: 'white', fontSize: '13px', cursor: 'pointer' }}>{loading ? '...' : '↻ Refresh'}</button>
         </div>
+
+        {activeTab === 'markets' ? (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '16px' }}>
+            {filteredMarkets.length === 0 ? (
+              <div style={{ gridColumn: '1 / -1', padding: '50px', textAlign: 'center', color: '#737373' }}>No markets found</div>
+            ) : (
+              filteredMarkets.map(market => <MarketCard key={market.id} market={market} />)
+            )}
+          </div>
+        ) : (
+          <div style={{ backgroundColor: 'white', borderRadius: '14px', border: '1px solid #e5e5e5', overflow: 'hidden' }}>
+            {loading && !currentData.length ? <div style={{ padding: '50px', textAlign: 'center', color: '#737373' }}>Loading...</div> : (
+              <div style={{ overflowX: 'auto' }}>
+                <div style={{ minWidth: '850px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: activeTab === 'memes' ? '45px 2fr 0.7fr 1fr 1fr 1fr 1fr 0.9fr' : '45px 2fr 1fr 1fr 1fr 1fr 1fr 0.9fr', padding: '10px 14px', backgroundColor: '#fafafa', borderBottom: '1px solid #e5e5e5', fontSize: '10px', fontWeight: '600', color: '#737373', textTransform: 'uppercase' }}>
+                    <div>#</div>
+                    <div onClick={() => { setSortField('name'); setSortDirection(d => sortField === 'name' ? (d === 'desc' ? 'asc' : 'desc') : 'desc'); }} style={{ cursor: 'pointer' }}>Token</div>
+                    {activeTab === 'memes' && <div>Chain</div>}
+                    <div onClick={() => { setSortField('price'); setSortDirection(d => sortField === 'price' ? (d === 'desc' ? 'asc' : 'desc') : 'desc'); }} style={{ cursor: 'pointer', textAlign: 'right' }}>Price</div>
+                    <div onClick={() => { setSortField('priceChange24h'); setSortDirection(d => sortField === 'priceChange24h' ? (d === 'desc' ? 'asc' : 'desc') : 'desc'); }} style={{ cursor: 'pointer', textAlign: 'right' }}>24h</div>
+                    {activeTab !== 'memes' && <div onClick={() => { setSortField('netFlow'); setSortDirection(d => sortField === 'netFlow' ? (d === 'desc' ? 'asc' : 'desc') : 'desc'); }} style={{ cursor: 'pointer', textAlign: 'right' }}>Net Flow</div>}
+                    <div onClick={() => { setSortField('volume24h'); setSortDirection(d => sortField === 'volume24h' ? (d === 'desc' ? 'asc' : 'desc') : 'desc'); }} style={{ cursor: 'pointer', textAlign: 'right' }}>Vol</div>
+                    <div onClick={() => { setSortField('marketCap'); setSortDirection(d => sortField === 'marketCap' ? (d === 'desc' ? 'asc' : 'desc') : 'desc'); }} style={{ cursor: 'pointer', textAlign: 'right' }}>MCap</div>
+                    <div onClick={() => { setSortField(activeTab === 'memes' ? 'viralScore' : 'signalScore'); setSortDirection(d => d === 'desc' ? 'asc' : 'desc'); }} style={{ cursor: 'pointer', textAlign: 'center' }}>{activeTab === 'memes' ? 'Viral' : 'Signal'}</div>
+                  </div>
+
+                  {sortedData.map((t, i) => {
+                    const viral = getViralLabel(t.viralScore);
+                    const signal = getSignalLabel(t.signalScore);
+                    const chain = getChainBadge(t.chain);
+                    return (
+                      <div key={t.id + i} onClick={() => setSelectedCoin(t)} style={{ display: 'grid', gridTemplateColumns: activeTab === 'memes' ? '45px 2fr 0.7fr 1fr 1fr 1fr 1fr 0.9fr' : '45px 2fr 1fr 1fr 1fr 1fr 1fr 0.9fr', padding: '12px 14px', borderBottom: '1px solid #f5f5f5', alignItems: 'center', fontSize: '13px', cursor: 'pointer', transition: 'background 0.1s' }} onMouseEnter={e => e.currentTarget.style.backgroundColor = '#fafafa'} onMouseLeave={e => e.currentTarget.style.backgroundColor = ''}>
+                        <div style={{ color: '#a3a3a3', fontSize: '11px' }}>{i + 1}</div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          {t.image ? <img src={t.image} alt="" style={{ width: '26px', height: '26px', borderRadius: '50%' }} onError={e => e.target.style.display='none'} /> : <div style={{ width: '26px', height: '26px', borderRadius: '50%', backgroundColor: '#f0f0f0', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: '600' }}>{t.symbol?.[0]}</div>}
+                          <div><div style={{ fontWeight: '600', color: '#171717', display: 'flex', alignItems: 'center', gap: '4px', fontSize: '13px' }}>{t.name?.length > 14 ? t.name.slice(0, 14) + '…' : t.name} {t.isPumpFun && <span style={{ fontSize: '8px', padding: '1px 3px', backgroundColor: '#dcfce7', color: '#16a34a', borderRadius: '2px' }}>🎰</span>}</div><div style={{ fontSize: '10px', color: '#a3a3a3' }}>{t.symbol}</div></div>
+                        </div>
+                        {activeTab === 'memes' && <div><span style={{ backgroundColor: chain.b, color: chain.c, padding: '2px 5px', borderRadius: '3px', fontSize: '9px', fontWeight: '600' }}>{chain.l}</span></div>}
+                        <div style={{ textAlign: 'right', fontWeight: '600', fontFamily: 'monospace', fontSize: '12px' }}>{formatPrice(t.price)}</div>
+                        <div style={{ textAlign: 'right', fontWeight: '600', color: t.priceChange24h >= 0 ? '#16a34a' : '#dc2626', fontSize: '12px' }}>{formatPercent(t.priceChange24h)}</div>
+                        {activeTab !== 'memes' && <div style={{ textAlign: 'right', color: t.netFlow >= 0 ? '#16a34a' : '#dc2626', fontSize: '11px' }}>{t.netFlow >= 0 ? '+' : ''}{formatLargeNumber(t.netFlow)}</div>}
+                        <div style={{ textAlign: 'right', fontSize: '11px', color: '#525252' }}>{formatLargeNumber(t.volume24h)}</div>
+                        <div style={{ textAlign: 'right', fontSize: '11px', color: '#525252' }}>{formatLargeNumber(t.marketCap)}</div>
+                        <div style={{ textAlign: 'center' }}>{activeTab === 'memes' ? <span style={{ backgroundColor: viral.bg, color: viral.color, padding: '3px 7px', borderRadius: '4px', fontSize: '10px', fontWeight: '600' }}>{viral.label}</span> : <span style={{ backgroundColor: signal.bg, color: signal.color, padding: '3px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: '600' }}>{t.signalScore}</span>}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {selectedCoin && <CoinModal coin={selectedCoin} onClose={() => setSelectedCoin(null)} />}
       </div>
