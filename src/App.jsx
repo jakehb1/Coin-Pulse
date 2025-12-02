@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 
 const COINGECKO_API = 'https://api.coingecko.com/api/v3';
 const DEXSCREENER_API = 'https://api.dexscreener.com';
@@ -170,6 +170,15 @@ const TrendCard = ({ topic }) => {
   );
 };
 
+// Loading Spinner Component
+const LoadingSpinner = () => (
+  <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '30px', gap: '8px' }}>
+    <div style={{ width: '24px', height: '24px', border: '3px solid #e5e5e5', borderTopColor: '#171717', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+    <span style={{ color: '#737373', fontSize: '13px' }}>Loading more trends...</span>
+    <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+  </div>
+);
+
 export default function App() {
   const [activeTab, setActiveTab] = useState('trends');
   const [data, setData] = useState([]);
@@ -183,29 +192,60 @@ export default function App() {
   const [launchFilter, setLaunchFilter] = useState('all');
   const [error, setError] = useState(null);
   const [debugInfo, setDebugInfo] = useState('');
+  
+  // Infinite scroll state
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [totalCount, setTotalCount] = useState(0);
+  const observerRef = useRef(null);
+  const loadMoreRef = useRef(null);
 
-  // Fetch live trends
-  const fetchTrends = useCallback(async () => {
-    setTrendLoading(true);
-    setError(null);
-    setDebugInfo('Fetching trends...');
+  // Fetch trends with pagination
+  const fetchTrends = useCallback(async (pageNum = 1, append = false) => {
+    if (pageNum === 1) {
+      setTrendLoading(true);
+      setError(null);
+      setDebugInfo('Fetching trends...');
+    } else {
+      setLoadingMore(true);
+    }
     
     try {
-      const res = await fetch('/api/aggregate', { signal: AbortSignal.timeout(30000) });
+      const res = await fetch(`/api/aggregate?page=${pageNum}&limit=15`, { signal: AbortSignal.timeout(30000) });
       const responseText = await res.text();
       
       if (res.ok) {
         try {
           const data = JSON.parse(responseText);
           if (data.success && data.topics?.length) {
-            setTrends(data.topics);
+            if (append) {
+              setTrends(prev => {
+                // Deduplicate by topic name
+                const existingTopics = new Set(prev.map(t => t.topic.toLowerCase()));
+                const newTopics = data.topics.filter(t => !existingTopics.has(t.topic.toLowerCase()));
+                return [...prev, ...newTopics];
+              });
+            } else {
+              setTrends(data.topics);
+            }
+            
+            // Update pagination state
+            if (data.pagination) {
+              setHasMore(data.pagination.hasMore);
+              setTotalCount(data.pagination.totalCount);
+            }
+            
             setTrendSource(data.sources || { hackernews: false, lemmy: false, crypto: false, dex: false });
             setLastUpdated(new Date());
             const d = data.debug || {};
-            setDebugInfo(`✓ Wiki: ${d.wikipedia || 0} | HN: ${d.hackernews || 0} | Lemmy: ${d.lemmy || 0} | Crypto: ${d.crypto || 0} | DEX: ${d.dex || 0}`);
+            setDebugInfo(`✓ Wiki: ${d.wikipedia || 0} | HN: ${d.hackernews || 0} | Lemmy: ${d.lemmy || 0} | Crypto: ${d.crypto || 0} | DEX: ${d.dex || 0} | Page: ${pageNum}/${data.pagination?.totalPages || '?'}`);
           } else {
-            setError('No trends available. Try refreshing.');
-            setDebugInfo(`API returned 0 topics. Debug: ${JSON.stringify(data.debug || {})}`);
+            if (pageNum === 1) {
+              setError('No trends available. Try refreshing.');
+              setDebugInfo(`API returned 0 topics. Debug: ${JSON.stringify(data.debug || {})}`);
+            }
+            setHasMore(false);
           }
         } catch (parseErr) {
           setError(`Parse error: ${parseErr.message}`);
@@ -220,8 +260,46 @@ export default function App() {
       setDebugInfo(`Error: ${err.message}`);
     } finally {
       setTrendLoading(false);
+      setLoadingMore(false);
     }
   }, []);
+
+  // Load more trends
+  const loadMoreTrends = useCallback(() => {
+    if (!loadingMore && hasMore && !searchQuery.trim() && launchFilter === 'all') {
+      const nextPage = page + 1;
+      setPage(nextPage);
+      fetchTrends(nextPage, true);
+    }
+  }, [loadingMore, hasMore, page, fetchTrends, searchQuery, launchFilter]);
+
+  // Intersection Observer for infinite scroll
+  useEffect(() => {
+    if (observerRef.current) observerRef.current.disconnect();
+    
+    observerRef.current = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && hasMore && !loadingMore && activeTab === 'trends') {
+          loadMoreTrends();
+        }
+      },
+      { threshold: 0.1, rootMargin: '100px' }
+    );
+    
+    if (loadMoreRef.current) {
+      observerRef.current.observe(loadMoreRef.current);
+    }
+    
+    return () => {
+      if (observerRef.current) observerRef.current.disconnect();
+    };
+  }, [hasMore, loadingMore, loadMoreTrends, activeTab]);
+
+  // Reset pagination when filters change
+  useEffect(() => {
+    setPage(1);
+    setHasMore(true);
+  }, [searchQuery, launchFilter]);
 
   const fetchCoins = useCallback(async () => {
     try {
@@ -250,17 +328,24 @@ export default function App() {
 
   useEffect(() => {
     setLoading(true);
-    Promise.all([fetchCoins(), fetchMemes(), fetchTrends()]).finally(() => setLoading(false));
+    Promise.all([fetchCoins(), fetchMemes(), fetchTrends(1, false)]).finally(() => setLoading(false));
   }, [fetchCoins, fetchMemes, fetchTrends]);
 
+  // Auto-refresh every 2 minutes (reset to page 1)
   useEffect(() => {
-    const interval = setInterval(() => { fetchTrends(); fetchCoins(); fetchMemes(); }, 120000);
+    const interval = setInterval(() => {
+      setPage(1);
+      setHasMore(true);
+      fetchTrends(1, false);
+      fetchCoins();
+      fetchMemes();
+    }, 120000);
     return () => clearInterval(interval);
   }, [fetchTrends, fetchCoins, fetchMemes]);
 
   const filteredTrends = useMemo(() => {
     let t = [...trends];
-    if (searchQuery.trim()) t = t.filter(x => x.topic.toLowerCase().includes(searchQuery.toLowerCase()) || x.ticker?.toLowerCase().includes(searchQuery.toLowerCase()));
+    if (searchQuery.trim()) t = t.filter(x => (x.topic || '').toLowerCase().includes(searchQuery.toLowerCase()) || (x.ticker || '').toLowerCase().includes(searchQuery.toLowerCase()));
     if (launchFilter === 'hot') t = t.filter(x => x.launchScore >= 65);
     else if (launchFilter === 'cross') t = t.filter(x => x.sourceCount >= 2 || x.crossPlatform);
     else if (launchFilter === 'pop') t = t.filter(x => x.category === 'Entertainment' || x.sources?.wikipedia);
@@ -272,9 +357,19 @@ export default function App() {
   const currentData = activeTab === 'memes' ? memeData : data;
   const filteredData = useMemo(() => {
     let d = [...currentData];
-    if (searchQuery.trim()) d = d.filter(c => c.name.toLowerCase().includes(searchQuery.toLowerCase()) || c.symbol.toLowerCase().includes(searchQuery.toLowerCase()));
+    if (searchQuery.trim()) d = d.filter(c => (c.name || '').toLowerCase().includes(searchQuery.toLowerCase()) || (c.symbol || '').toLowerCase().includes(searchQuery.toLowerCase()));
     return d.sort((a, b) => b.signalScore - a.signalScore);
   }, [currentData, searchQuery]);
+
+  // Handle refresh button
+  const handleRefresh = () => {
+    setPage(1);
+    setHasMore(true);
+    setTrends([]);
+    fetchTrends(1, false);
+    fetchCoins();
+    fetchMemes();
+  };
 
   return (
     <div style={{ minHeight: '100vh', backgroundColor: '#fafafa', padding: '20px 16px', fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif' }}>
@@ -325,7 +420,7 @@ export default function App() {
               ))}
             </div>
           )}
-          <button onClick={() => { fetchTrends(); fetchCoins(); fetchMemes(); }} disabled={trendLoading} style={{ padding: '10px 16px', borderRadius: '10px', border: '1px solid #e5e5e5', background: trendLoading ? '#f5f5f5' : 'white', fontSize: '13px', cursor: trendLoading ? 'wait' : 'pointer' }}>{trendLoading ? '⏳...' : '↻ Refresh'}</button>
+          <button onClick={handleRefresh} disabled={trendLoading} style={{ padding: '10px 16px', borderRadius: '10px', border: '1px solid #e5e5e5', background: trendLoading ? '#f5f5f5' : 'white', fontSize: '13px', cursor: trendLoading ? 'wait' : 'pointer' }}>{trendLoading ? '⏳...' : '↻ Refresh'}</button>
         </div>
 
         {error && activeTab === 'trends' && (
@@ -350,9 +445,30 @@ export default function App() {
                 <div style={{ fontSize: '11px', color: '#a3a3a3' }}>Check the debug info above for details. Try refreshing or check Vercel function logs.</div>
               </div>
             ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: '16px' }}>
-                {filteredTrends.map((t, i) => <TrendCard key={t.topic + i} topic={t} />)}
-              </div>
+              <>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: '16px' }}>
+                  {filteredTrends.map((t, i) => <TrendCard key={t.topic + i} topic={t} />)}
+                </div>
+                
+                {/* Infinite scroll sentinel & loading indicator */}
+                {launchFilter === 'all' && !searchQuery.trim() && (
+                  <div ref={loadMoreRef} style={{ padding: '20px', textAlign: 'center' }}>
+                    {loadingMore && <LoadingSpinner />}
+                    {!hasMore && trends.length > 0 && (
+                      <div style={{ color: '#a3a3a3', fontSize: '13px', padding: '20px' }}>
+                        ✓ All {totalCount} trends loaded
+                      </div>
+                    )}
+                  </div>
+                )}
+                
+                {/* Show count when filtered */}
+                {(launchFilter !== 'all' || searchQuery.trim()) && (
+                  <div style={{ textAlign: 'center', padding: '20px', color: '#737373', fontSize: '12px' }}>
+                    Showing {filteredTrends.length} of {trends.length} trends
+                  </div>
+                )}
+              </>
             )}
           </div>
         )}
