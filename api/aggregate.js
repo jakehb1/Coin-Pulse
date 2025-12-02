@@ -1,9 +1,16 @@
 // Vercel Serverless - Aggregates ALL free trend sources with cross-referencing
+// Now with pagination support for infinite scroll
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET');
   
-  const debug = { errors: [] };
+  // Pagination params
+  const page = Math.max(1, parseInt(req.query.page) || 1);
+  const limit = Math.min(50, Math.max(1, parseInt(req.query.limit) || 20));
+  const offset = (page - 1) * limit;
+  
+  const debug = { errors: [], page, limit };
   
   try {
     // Fetch all sources in parallel
@@ -35,7 +42,7 @@ export default async function handler(req, res) {
     
     const topicMap = new Map();
     
-    // Helper to normalize topic names for matching - NOW WITH NULL SAFETY
+    // Helper to normalize topic names for matching - WITH NULL SAFETY
     const normalize = (str) => (str || '').toLowerCase().replace(/[^a-z0-9]/g, '');
     
     // Helper to find existing topic with fuzzy match
@@ -54,7 +61,7 @@ export default async function handler(req, res) {
     
     // Process Wikipedia topics FIRST (most comprehensive for entertainment/pop culture)
     for (const t of (wikiResult.topics || [])) {
-      if (!t?.topic) continue; // Skip if no topic
+      if (!t?.topic) continue;
       const key = t.topic.toLowerCase();
       topicMap.set(key, {
         topic: t.topic,
@@ -66,7 +73,7 @@ export default async function handler(req, res) {
     
     // Process Hacker News topics
     for (const t of (hnResult.topics || [])) {
-      if (!t?.topic) continue; // Skip if no topic
+      if (!t?.topic) continue;
       const key = t.topic.toLowerCase();
       const existing = findExisting(t.topic) || key;
       
@@ -86,7 +93,7 @@ export default async function handler(req, res) {
     
     // Process Lemmy topics (Reddit alternative)
     for (const t of (lemmyResult.topics || [])) {
-      if (!t?.topic) continue; // Skip if no topic
+      if (!t?.topic) continue;
       const key = t.topic.toLowerCase();
       const existing = findExisting(t.topic) || key;
       
@@ -105,8 +112,8 @@ export default async function handler(req, res) {
     }
     
     // Add trending crypto coins - WITH NULL SAFETY
-    for (const coin of (cryptoResult.coins || []).slice(0, 10)) {
-      if (!coin?.name) continue; // Skip if no name
+    for (const coin of (cryptoResult.coins || []).slice(0, 15)) {
+      if (!coin?.name) continue;
       const key = coin.name.toLowerCase();
       const existing = findExisting(coin.name);
       
@@ -126,8 +133,8 @@ export default async function handler(req, res) {
     }
     
     // Add trending DEX tokens - WITH NULL SAFETY
-    for (const pool of (dexResult.trending || []).slice(0, 10)) {
-      if (!pool?.baseToken?.name) continue; // Skip if no baseToken name
+    for (const pool of (dexResult.trending || []).slice(0, 15)) {
+      if (!pool?.baseToken?.name) continue;
       const key = pool.baseToken.name.toLowerCase();
       if (!topicMap.has(key) && !findExisting(pool.baseToken.name)) {
         topicMap.set(key, {
@@ -139,13 +146,13 @@ export default async function handler(req, res) {
       }
     }
     
-    // Calculate scores and sort
-    const aggregatedTopics = [];
+    // Calculate scores and sort ALL topics
+    const allTopics = [];
     for (const [, data] of topicMap) {
       const sourceCount = Object.keys(data.sources).length;
       data.crossPlatform = sourceCount >= 2;
       const launchScore = calculateLaunchScore(data);
-      aggregatedTopics.push({
+      allTopics.push({
         ...data,
         launchScore,
         launchLabel: getLaunchLabel(launchScore),
@@ -153,14 +160,19 @@ export default async function handler(req, res) {
         sourceCount,
       });
     }
-    aggregatedTopics.sort((a, b) => b.launchScore - a.launchScore);
+    allTopics.sort((a, b) => b.launchScore - a.launchScore);
     
-    // Also return top stories/posts for display
-    const topContent = [
+    // Apply pagination
+    const totalCount = allTopics.length;
+    const paginatedTopics = allTopics.slice(offset, offset + limit);
+    const hasMore = offset + limit < totalCount;
+    
+    // Also return top stories/posts for display (only on first page)
+    const topContent = page === 1 ? [
       ...(hnResult.topStories || []).slice(0, 8).map(s => ({ ...s, source: 'hackernews' })),
       ...(lemmyResult.topPosts || []).slice(0, 8).map(p => ({ ...p, source: 'lemmy' })),
       ...(wikiResult.trending || []).slice(0, 8).map(w => ({ title: w.title, url: w.url, score: w.views, source: 'wikipedia' })),
-    ].sort((a, b) => (b.score || 0) - (a.score || 0)).slice(0, 15);
+    ].sort((a, b) => (b.score || 0) - (a.score || 0)).slice(0, 15) : [];
     
     res.status(200).json({
       success: true,
@@ -172,7 +184,15 @@ export default async function handler(req, res) {
         dex: (dexResult.trending?.length || 0) > 0,
         wikipedia: (wikiResult.topics?.length || 0) > 0,
       },
-      topics: aggregatedTopics.slice(0, 40),
+      // Pagination info
+      pagination: {
+        page,
+        limit,
+        totalCount,
+        totalPages: Math.ceil(totalCount / limit),
+        hasMore,
+      },
+      topics: paginatedTopics,
       topContent,
       debug,
     });
@@ -182,13 +202,13 @@ export default async function handler(req, res) {
   }
 }
 
-// Fetch Hacker News
+// Fetch Hacker News - get more stories for more topics
 async function fetchHackerNews() {
   const topRes = await fetch('https://hacker-news.firebaseio.com/v0/topstories.json');
   const topIds = await topRes.json();
   
   const stories = await Promise.all(
-    topIds.slice(0, 30).map(async (id) => {
+    topIds.slice(0, 50).map(async (id) => {
       try {
         const r = await fetch(`https://hacker-news.firebaseio.com/v0/item/${id}.json`);
         return await r.json();
@@ -216,7 +236,7 @@ async function fetchHackerNews() {
     .filter(([_, d]) => d.mentions >= 2)
     .map(([topic, d]) => ({ topic, mentions: d.mentions, totalScore: d.totalScore, stories: d.stories }))
     .sort((a, b) => b.totalScore - a.totalScore)
-    .slice(0, 20);
+    .slice(0, 30);
   
   const topStories = validStories.slice(0, 15).map(s => ({
     id: s.id, title: s.title, url: s.url || `https://news.ycombinator.com/item?id=${s.id}`, score: s.score, comments: s.descendants || 0
@@ -232,7 +252,7 @@ async function fetchCryptoTrending() {
   const data = await res.json();
   
   const coins = (data.coins || [])
-    .filter(item => item?.item?.name) // Filter out items without names
+    .filter(item => item?.item?.name)
     .map((item, i) => {
       const c = item.item;
       return { 
@@ -255,8 +275,8 @@ async function fetchDexTrending() {
   const data = await res.json();
   
   const trending = (data.data || [])
-    .slice(0, 15)
-    .filter(pool => pool?.attributes?.base_token_name) // Filter out pools without token names
+    .slice(0, 20)
+    .filter(pool => pool?.attributes?.base_token_name)
     .map((pool) => {
       const a = pool.attributes || {};
       return {
@@ -273,14 +293,14 @@ async function fetchDexTrending() {
   return { trending };
 }
 
-// Fetch Lemmy (Reddit alternative)
+// Fetch Lemmy (Reddit alternative) - get more posts
 async function fetchLemmy() {
-  const instances = ['https://lemmy.world', 'https://lemmy.ml'];
+  const instances = ['https://lemmy.world', 'https://lemmy.ml', 'https://programming.dev'];
   const allPosts = [];
   
   for (const instance of instances) {
     try {
-      const response = await fetch(`${instance}/api/v3/post/list?sort=Hot&limit=25&type_=All`, {
+      const response = await fetch(`${instance}/api/v3/post/list?sort=Hot&limit=40&type_=All`, {
         headers: { 'Accept': 'application/json', 'User-Agent': 'Pulse/1.0' }
       });
       if (response.ok) {
@@ -314,12 +334,12 @@ async function fetchLemmy() {
     .filter(([_, d]) => d.mentions >= 2)
     .map(([topic, d]) => ({ topic, mentions: d.mentions, totalScore: d.totalScore, posts: d.posts }))
     .sort((a, b) => b.totalScore - a.totalScore)
-    .slice(0, 20);
+    .slice(0, 30);
   
   return { topics, topPosts: allPosts.slice(0, 15) };
 }
 
-// Fetch Wikipedia Most Read (catches entertainment, movies, TV, celebrities)
+// Fetch Wikipedia Most Read - get more articles
 async function fetchWikipedia() {
   const now = new Date();
   now.setDate(now.getDate() - 1);
@@ -340,8 +360,8 @@ async function fetchWikipedia() {
   const isSkip = (title) => skipPatterns.some(p => p.test(title));
   
   const trending = articles
-    .filter(a => a?.article && !isSkip(a.article) && a.views > 50000)
-    .slice(0, 30)
+    .filter(a => a?.article && !isSkip(a.article) && a.views > 30000)
+    .slice(0, 50)
     .map((a, i) => {
       const title = a.article.replace(/_/g, ' ').replace(/\s*\([^)]+\)\s*/g, '').trim();
       return {
@@ -385,7 +405,6 @@ function categorize(topic) {
 function calculateLaunchScore(data) {
   let score = 0;
   
-  // Wikipedia weight (pop culture, entertainment, viral content)
   if (data.sources.wikipedia) {
     const views = data.sources.wikipedia.views || 0;
     const rank = data.sources.wikipedia.rank || 99;
@@ -394,41 +413,35 @@ function calculateLaunchScore(data) {
     else if (rank <= 25) score += 5;
   }
   
-  // Hacker News weight (tech/AI focused)
   if (data.sources.hackernews) {
     const hnScore = data.sources.hackernews.score || 0;
     score += hnScore >= 500 ? 30 : hnScore >= 200 ? 25 : hnScore >= 100 ? 20 : hnScore >= 50 ? 15 : 10;
     if (data.sources.hackernews.mentions >= 3) score += 5;
   }
   
-  // Lemmy weight (community discussions)
   if (data.sources.lemmy) {
     const lemmyScore = data.sources.lemmy.score || 0;
     score += lemmyScore >= 500 ? 25 : lemmyScore >= 200 ? 20 : lemmyScore >= 100 ? 15 : 10;
     if (data.sources.lemmy.mentions >= 3) score += 5;
   }
   
-  // Crypto weight (direct market relevance)
   if (data.sources.crypto) {
     const rank = data.sources.crypto.rank || 99;
     score += rank <= 3 ? 35 : rank <= 5 ? 30 : rank <= 10 ? 25 : 15;
   }
   
-  // DEX weight (on-chain activity)
   if (data.sources.dex) {
     const volume = data.sources.dex.volume || 0;
     score += volume >= 1000000 ? 30 : volume >= 100000 ? 25 : volume >= 10000 ? 20 : 15;
   }
   
-  // Cross-platform bonus (THE KEY FEATURE)
   const sourceCount = Object.keys(data.sources).length;
-  if (sourceCount >= 4) score += 30;  // Viral across many sources!
+  if (sourceCount >= 4) score += 30;
   else if (sourceCount >= 3) score += 25;
   else if (sourceCount >= 2) score += 15;
   
-  // Category bonus
   if (data.category === 'Crypto' || data.category === 'AI') score += 5;
-  if (data.category === 'Entertainment') score += 3; // Pop culture bonus
+  if (data.category === 'Entertainment') score += 3;
   
   return Math.min(100, score);
 }
