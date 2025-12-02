@@ -35,15 +35,18 @@ export default async function handler(req, res) {
     
     const topicMap = new Map();
     
-    // Helper to normalize topic names for matching
-    const normalize = (str) => str.toLowerCase().replace(/[^a-z0-9]/g, '');
+    // Helper to normalize topic names for matching - NOW WITH NULL SAFETY
+    const normalize = (str) => (str || '').toLowerCase().replace(/[^a-z0-9]/g, '');
     
     // Helper to find existing topic with fuzzy match
     const findExisting = (name) => {
+      if (!name) return null;
       const norm = normalize(name);
+      if (norm.length <= 3) return null;
       for (const [key, data] of topicMap) {
-        if (normalize(key).includes(norm) || norm.includes(normalize(key))) {
-          if (norm.length > 3 && normalize(key).length > 3) return key;
+        const keyNorm = normalize(key);
+        if (keyNorm.length > 3 && (keyNorm.includes(norm) || norm.includes(keyNorm))) {
+          return key;
         }
       }
       return null;
@@ -51,6 +54,7 @@ export default async function handler(req, res) {
     
     // Process Wikipedia topics FIRST (most comprehensive for entertainment/pop culture)
     for (const t of (wikiResult.topics || [])) {
+      if (!t?.topic) continue; // Skip if no topic
       const key = t.topic.toLowerCase();
       topicMap.set(key, {
         topic: t.topic,
@@ -62,6 +66,7 @@ export default async function handler(req, res) {
     
     // Process Hacker News topics
     for (const t of (hnResult.topics || [])) {
+      if (!t?.topic) continue; // Skip if no topic
       const key = t.topic.toLowerCase();
       const existing = findExisting(t.topic) || key;
       
@@ -81,6 +86,7 @@ export default async function handler(req, res) {
     
     // Process Lemmy topics (Reddit alternative)
     for (const t of (lemmyResult.topics || [])) {
+      if (!t?.topic) continue; // Skip if no topic
       const key = t.topic.toLowerCase();
       const existing = findExisting(t.topic) || key;
       
@@ -98,8 +104,9 @@ export default async function handler(req, res) {
       }
     }
     
-    // Add trending crypto coins
+    // Add trending crypto coins - WITH NULL SAFETY
     for (const coin of (cryptoResult.coins || []).slice(0, 10)) {
+      if (!coin?.name) continue; // Skip if no name
       const key = coin.name.toLowerCase();
       const existing = findExisting(coin.name);
       
@@ -111,21 +118,22 @@ export default async function handler(req, res) {
       } else {
         topicMap.set(key, {
           topic: coin.name,
-          ticker: '$' + coin.symbol,
+          ticker: '$' + (coin.symbol || coin.name.slice(0, 4).toUpperCase()),
           sources: { crypto: { rank: coin.rank, symbol: coin.symbol, price: coin.data?.price, change24h: coin.data?.priceChange24h, thumb: coin.thumb } },
           category: 'Crypto',
         });
       }
     }
     
-    // Add trending DEX tokens
+    // Add trending DEX tokens - WITH NULL SAFETY
     for (const pool of (dexResult.trending || []).slice(0, 10)) {
+      if (!pool?.baseToken?.name) continue; // Skip if no baseToken name
       const key = pool.baseToken.name.toLowerCase();
       if (!topicMap.has(key) && !findExisting(pool.baseToken.name)) {
         topicMap.set(key, {
           topic: pool.baseToken.name,
-          ticker: '$' + pool.baseToken.symbol,
-          sources: { dex: { price: pool.price, change24h: pool.priceChange.h24, volume: pool.volume24h, liquidity: pool.liquidity, dex: pool.dex } },
+          ticker: '$' + (pool.baseToken.symbol || pool.baseToken.name.slice(0, 4).toUpperCase()),
+          sources: { dex: { price: pool.price, change24h: pool.priceChange?.h24, volume: pool.volume24h, liquidity: pool.liquidity, dex: pool.dex } },
           category: 'Crypto',
         });
       }
@@ -217,38 +225,50 @@ async function fetchHackerNews() {
   return { topics, topStories };
 }
 
-// Fetch CoinGecko trending
+// Fetch CoinGecko trending - WITH NULL SAFETY
 async function fetchCryptoTrending() {
   const res = await fetch('https://api.coingecko.com/api/v3/search/trending', { headers: { 'Accept': 'application/json' } });
   if (!res.ok) throw new Error(`CoinGecko: ${res.status}`);
   const data = await res.json();
   
-  const coins = (data.coins || []).map((item, i) => {
-    const c = item.item;
-    return { id: c.id, name: c.name, symbol: c.symbol?.toUpperCase(), rank: i + 1, thumb: c.thumb, data: c.data ? { price: c.data.price, priceChange24h: c.data.price_change_percentage_24h?.usd } : null };
-  });
+  const coins = (data.coins || [])
+    .filter(item => item?.item?.name) // Filter out items without names
+    .map((item, i) => {
+      const c = item.item;
+      return { 
+        id: c.id, 
+        name: c.name, 
+        symbol: (c.symbol || '').toUpperCase(), 
+        rank: i + 1, 
+        thumb: c.thumb, 
+        data: c.data ? { price: c.data.price, priceChange24h: c.data.price_change_percentage_24h?.usd } : null 
+      };
+    });
   
   return { coins };
 }
 
-// Fetch GeckoTerminal DEX trending
+// Fetch GeckoTerminal DEX trending - WITH NULL SAFETY
 async function fetchDexTrending() {
   const res = await fetch('https://api.geckoterminal.com/api/v2/networks/solana/trending_pools', { headers: { 'Accept': 'application/json' } });
   if (!res.ok) throw new Error(`GeckoTerminal: ${res.status}`);
   const data = await res.json();
   
-  const trending = (data.data || []).slice(0, 15).map((pool) => {
-    const a = pool.attributes || {};
-    return {
-      name: a.name,
-      baseToken: { name: a.base_token_name, symbol: a.base_token_symbol },
-      price: parseFloat(a.base_token_price_usd) || 0,
-      priceChange: { h24: parseFloat(a.price_change_percentage?.h24) || 0 },
-      volume24h: parseFloat(a.volume_usd?.h24) || 0,
-      liquidity: parseFloat(a.reserve_in_usd) || 0,
-      dex: a.dex_id,
-    };
-  });
+  const trending = (data.data || [])
+    .slice(0, 15)
+    .filter(pool => pool?.attributes?.base_token_name) // Filter out pools without token names
+    .map((pool) => {
+      const a = pool.attributes || {};
+      return {
+        name: a.name,
+        baseToken: { name: a.base_token_name, symbol: a.base_token_symbol || '' },
+        price: parseFloat(a.base_token_price_usd) || 0,
+        priceChange: { h24: parseFloat(a.price_change_percentage?.h24) || 0 },
+        volume24h: parseFloat(a.volume_usd?.h24) || 0,
+        liquidity: parseFloat(a.reserve_in_usd) || 0,
+        dex: a.dex_id,
+      };
+    });
   
   return { trending };
 }
@@ -280,6 +300,7 @@ async function fetchLemmy() {
   const topicCounts = {};
   
   for (const post of allPosts) {
+    if (!post.title) continue;
     const words = post.title.toLowerCase().replace(/[^\w\s]/g, ' ').split(/\s+/).filter(w => w.length > 3 && !skipWords.has(w));
     for (const word of words) {
       if (!topicCounts[word]) topicCounts[word] = { mentions: 0, totalScore: 0, posts: [] };
@@ -319,7 +340,7 @@ async function fetchWikipedia() {
   const isSkip = (title) => skipPatterns.some(p => p.test(title));
   
   const trending = articles
-    .filter(a => !isSkip(a.article) && a.views > 50000)
+    .filter(a => a?.article && !isSkip(a.article) && a.views > 50000)
     .slice(0, 30)
     .map((a, i) => {
       const title = a.article.replace(/_/g, ' ').replace(/\s*\([^)]+\)\s*/g, '').trim();
@@ -338,7 +359,7 @@ async function fetchWikipedia() {
 }
 
 function categorizeWiki(title) {
-  const t = title.toLowerCase();
+  const t = (title || '').toLowerCase();
   if (/\(film\)|\(movie\)|\(tv_series\)|\(series\)|netflix|disney|hbo|marvel/i.test(t)) return 'Entertainment';
   if (/nfl|nba|mlb|premier_league|world_cup|olympics|football|basketball|soccer/i.test(t)) return 'Sports';
   if (/president|election|congress|senate|trump|biden|harris|political/i.test(t)) return 'Politics';
@@ -350,7 +371,7 @@ function categorizeWiki(title) {
 }
 
 function categorize(topic) {
-  const t = topic.toLowerCase();
+  const t = (topic || '').toLowerCase();
   if (/crypto|bitcoin|btc|ethereum|eth|solana|sol|token|coin|nft|defi|web3/.test(t)) return 'Crypto';
   if (/trump|biden|election|vote|congress|president|political|government/.test(t)) return 'Politics';
   if (/stock|market|fed|rate|economy|inflation|nasdaq|dow|finance/.test(t)) return 'Economics';
