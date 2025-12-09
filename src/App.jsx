@@ -38,9 +38,19 @@ const generateFlowData = (coin, isMeme = false) => {
 };
 
 const formatPrice = (p) => p === 0 ? '$0' : p < 0.00001 ? `$${p.toExponential(2)}` : p < 0.001 ? `$${p.toFixed(8)}` : p < 1 ? `$${p.toFixed(4)}` : `$${p.toLocaleString(undefined, {maximumFractionDigits: 2})}`;
-const formatLargeNumber = (n) => !n ? '-' : n >= 1e9 ? `$${(n/1e9).toFixed(2)}B` : n >= 1e6 ? `$${(n/1e6).toFixed(2)}M` : n >= 1e3 ? `$${(n/1e3).toFixed(1)}K` : `$${n.toFixed(0)}`;
+const formatLargeNumber = (n) => {
+  if (!n || n === 0 || isNaN(n)) return '-';
+  if (n >= 1e12) return `$${(n/1e12).toFixed(2)}T`;
+  if (n >= 1e9) return `$${(n/1e9).toFixed(2)}B`;
+  if (n >= 1e6) return `$${(n/1e6).toFixed(2)}M`;
+  if (n >= 1e3) return `$${(n/1e3).toFixed(1)}K`;
+  return `$${n.toFixed(0)}`;
+};
 const formatNumber = (n) => !n ? '0' : n >= 1e6 ? `${(n/1e6).toFixed(1)}M` : n >= 1e3 ? `${(n/1e3).toFixed(1)}K` : n.toString();
-const formatPercent = (n) => n == null ? '-' : `${n >= 0 ? '+' : ''}${n.toFixed(1)}%`;
+const formatPercent = (n) => {
+  if (n == null || n === undefined || isNaN(n)) return '-';
+  return `${n >= 0 ? '+' : ''}${n.toFixed(2)}%`;
+};
 
 const getSignalLabel = (s) => s >= 70 ? { label: 'Strong', color: '#16a34a', bg: '#dcfce7' } : s >= 50 ? { label: 'Neutral', color: '#737373', bg: '#f5f5f5' } : { label: 'Weak', color: '#f97316', bg: '#fff7ed' };
 const getViralLabel = (s) => s >= 80 ? { label: '🔥 VIRAL', color: '#dc2626', bg: '#fef2f2' } : s >= 60 ? { label: '🚀 HOT', color: '#f97316', bg: '#fff7ed' } : { label: '📈 Rising', color: '#eab308', bg: '#fefce8' };
@@ -193,6 +203,11 @@ export default function App() {
   const [error, setError] = useState(null);
   const [debugInfo, setDebugInfo] = useState('');
   
+  // Coins tab filters
+  const [filterNoise, setFilterNoise] = useState(true);
+  const [showStablecoins, setShowStablecoins] = useState(false);
+  const previousRanksRef = useRef({});
+  
   // Infinite scroll state
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
@@ -303,8 +318,105 @@ export default function App() {
 
   const fetchCoins = useCallback(async () => {
     try {
-      const res = await fetch(`${COINGECKO_API}/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=30&page=1&sparkline=false&price_change_percentage=24h`, { signal: AbortSignal.timeout(15000) });
-      if (res.ok) { const coins = await res.json(); if (coins?.length) { setData(coins.map(c => generateFlowData(c, false))); return; } }
+      const res = await fetch(`${COINGECKO_API}/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=100&page=1&sparkline=false&price_change_percentage=24h`, { signal: AbortSignal.timeout(20000) });
+      if (res.ok) {
+        const coins = await res.json();
+        if (coins?.length) {
+          // Calculate previous ranks for delta
+          const currentRanks = {};
+          coins.forEach((coin, index) => {
+            currentRanks[coin.id] = coin.market_cap_rank || (index + 1);
+          });
+          
+          // Fetch supply data for top 50 coins
+          const topCoinIds = coins.slice(0, 50).map(c => c.id);
+          const supplyDataMap = new Map();
+          
+          for (let i = 0; i < topCoinIds.length; i += 10) {
+            const batch = topCoinIds.slice(i, i + 10);
+            await Promise.all(
+              batch.map(async (id) => {
+                try {
+                  const detailRes = await fetch(
+                    `${COINGECKO_API}/coins/${id}?localization=false&tickers=false&market_data=true&community_data=false&developer_data=false&sparkline=false`,
+                    { signal: AbortSignal.timeout(8000) }
+                  );
+                  if (detailRes.ok) {
+                    const detailData = await detailRes.json();
+                    supplyDataMap.set(id, {
+                      totalSupply: detailData.market_data?.total_supply,
+                      circulatingSupply: detailData.market_data?.circulating_supply,
+                      marketCap: detailData.market_data?.market_cap?.usd
+                    });
+                  }
+                } catch {}
+              })
+            );
+            if (i + 10 < topCoinIds.length) {
+              await new Promise(resolve => setTimeout(resolve, 200));
+            }
+          }
+          
+          // Process coins with enhanced data
+          const enhancedCoins = coins.map((coin, index) => {
+            const supplyData = supplyDataMap.get(coin.id);
+            
+            // Use actual API data - prefer detail API, fallback to markets API
+            const currentPrice = coin.current_price || 0;
+            const marketCap = coin.market_cap || 0;
+            
+            // Get supply data from detail API (most accurate)
+            const circulatingSupply = supplyData?.circulatingSupply || null;
+            const totalSupply = supplyData?.totalSupply || null;
+            
+            // Use market cap from detail API if available (more accurate), otherwise use markets API
+            const reportedMarketCap = supplyData?.marketCap || marketCap;
+            
+            // Calculate FDV: Fully Diluted Valuation = total_supply * current_price
+            // Only calculate if we have both total supply and current price from API
+            let fdv = null;
+            if (totalSupply && currentPrice) {
+              fdv = totalSupply * currentPrice;
+            } else if (marketCap) {
+              // Fallback: if no total supply, use market cap as FDV approximation
+              fdv = marketCap;
+            }
+            
+            // Calculate Circ %: (circulating_supply / total_supply) * 100
+            // Only calculate if we have both values from API
+            let circPercent = null;
+            if (totalSupply && circulatingSupply && totalSupply > 0) {
+              circPercent = (circulatingSupply / totalSupply) * 100;
+            }
+            
+            // Calculate Delta: ranking change (previous_rank - current_rank)
+            // Positive delta = moved up, negative = moved down
+            const previousRank = previousRanksRef.current[coin.id];
+            const currentRank = coin.market_cap_rank || (index + 1);
+            const delta = previousRank && previousRank !== currentRank 
+              ? previousRank - currentRank 
+              : null;
+            
+            // Check if stablecoin
+            const isStablecoin = ['usdt', 'usdc', 'dai', 'busd', 'tusd', 'usdp', 'usdd', 'frax', 'lusd', 'susd', 'gusd', 'husd', 'ousd', 'usdn', 'usdk', 'usdx', 'usd', 'ust', 'mim'].includes(coin.id?.toLowerCase() || coin.symbol?.toLowerCase() || '');
+            
+            const baseData = generateFlowData(coin, false);
+            return {
+              ...baseData,
+              fdv: fdv,
+              reportedMarketCap: reportedMarketCap,
+              circPercent: circPercent,
+              rank: currentRank,
+              delta: delta,
+              isStablecoin: isStablecoin,
+            };
+          });
+          
+          previousRanksRef.current = currentRanks;
+          setData(enhancedCoins);
+          return;
+        }
+      }
     } catch {}
     setData(FALLBACK_COINS.map(c => generateFlowData(c, false)));
   }, []);
@@ -358,8 +470,28 @@ export default function App() {
   const filteredData = useMemo(() => {
     let d = [...currentData];
     if (searchQuery.trim()) d = d.filter(c => (c.name || '').toLowerCase().includes(searchQuery.toLowerCase()) || (c.symbol || '').toLowerCase().includes(searchQuery.toLowerCase()));
+    
+    // Apply filters for coins tab
+    if (activeTab === 'all') {
+      if (filterNoise) {
+        d = d.filter(coin => coin.marketCap >= 10000000); // $10M minimum
+      }
+      if (!showStablecoins) {
+        d = d.filter(coin => !coin.isStablecoin);
+      }
+    }
+    
     return d.sort((a, b) => b.signalScore - a.signalScore);
-  }, [currentData, searchQuery]);
+  }, [currentData, searchQuery, activeTab, filterNoise, showStablecoins]);
+  
+  // Count hidden coins
+  const hiddenByNoise = useMemo(() => {
+    return data.filter(coin => coin.marketCap < 10000000).length;
+  }, [data]);
+
+  const hiddenByStablecoins = useMemo(() => {
+    return data.filter(coin => coin.isStablecoin).length;
+  }, [data]);
 
   // Handle refresh button
   const handleRefresh = () => {
@@ -372,11 +504,11 @@ export default function App() {
   };
 
   return (
-    <div style={{ minHeight: '100vh', backgroundColor: '#fafafa', padding: '20px 16px', fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif' }}>
-      <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
+    <div style={{ minHeight: '100vh', backgroundColor: '#e5e5e5', padding: '20px 16px', fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif' }}>
+      <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
         <div style={{ textAlign: 'center', marginBottom: '20px' }}>
-          <h1 style={{ fontSize: '24px', fontWeight: '700', color: '#171717', margin: '0 0 6px' }}>
-            {activeTab === 'trends' ? '🔥 Trends' : activeTab === 'memes' ? '🐸 Memes' : 'Crypto Tracker'}
+          <h1 style={{ fontSize: '32px', fontWeight: '700', color: '#171717', margin: '0 0 6px', letterSpacing: '-0.02em' }}>
+            {activeTab === 'trends' ? '🔥 Trends' : activeTab === 'memes' ? '🐸 Memes' : 'pulse.ai'}
           </h1>
           <p style={{ fontSize: '12px', color: '#737373', margin: '0 0 10px' }}>
             {activeTab === 'trends' ? 'Real-time cross-platform trend detection' : activeTab === 'memes' ? 'Live from DexScreener' : 'Live prices'}
@@ -412,7 +544,126 @@ export default function App() {
         </div>
 
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', gap: '12px', flexWrap: 'wrap' }}>
-          <input type="text" placeholder="Search..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)} style={{ padding: '10px 14px', borderRadius: '10px', border: '1px solid #e5e5e5', fontSize: '14px', flex: '1 1 200px', maxWidth: '280px', outline: 'none' }} />
+          {activeTab === 'all' && (
+            <div style={{ display: 'flex', gap: '24px', alignItems: 'center', flexWrap: 'wrap' }}>
+              {/* Filter Noise Toggle */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <label style={{ 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  gap: '8px', 
+                  cursor: 'pointer',
+                  fontSize: '14px',
+                  color: '#525252'
+                }}>
+                  <input
+                    type="checkbox"
+                    checked={filterNoise}
+                    onChange={(e) => setFilterNoise(e.target.checked)}
+                    style={{ display: 'none' }}
+                  />
+                  <div style={{
+                    width: '44px',
+                    height: '24px',
+                    borderRadius: '12px',
+                    backgroundColor: filterNoise ? '#22c55e' : '#d1d5db',
+                    position: 'relative',
+                    transition: 'background-color 0.2s',
+                    cursor: 'pointer'
+                  }} onClick={() => setFilterNoise(!filterNoise)}>
+                    <div style={{
+                      width: '20px',
+                      height: '20px',
+                      borderRadius: '50%',
+                      backgroundColor: 'white',
+                      position: 'absolute',
+                      top: '2px',
+                      left: filterNoise ? '22px' : '2px',
+                      transition: 'left 0.2s',
+                      boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
+                    }}></div>
+                  </div>
+                  <span>Filter Noise ?</span>
+                </label>
+                <span style={{ fontSize: '12px', color: '#737373', marginLeft: '52px' }}>
+                  {hiddenByNoise} hidden
+                </span>
+              </div>
+
+              {/* Show Stablecoins Toggle */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <label style={{ 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  gap: '8px', 
+                  cursor: 'pointer',
+                  fontSize: '14px',
+                  color: '#525252'
+                }}>
+                  <input
+                    type="checkbox"
+                    checked={showStablecoins}
+                    onChange={(e) => setShowStablecoins(e.target.checked)}
+                    style={{ display: 'none' }}
+                  />
+                  <div style={{
+                    width: '44px',
+                    height: '24px',
+                    borderRadius: '12px',
+                    backgroundColor: showStablecoins ? '#22c55e' : '#d1d5db',
+                    position: 'relative',
+                    transition: 'background-color 0.2s',
+                    cursor: 'pointer'
+                  }} onClick={() => setShowStablecoins(!showStablecoins)}>
+                    <div style={{
+                      width: '20px',
+                      height: '20px',
+                      borderRadius: '50%',
+                      backgroundColor: 'white',
+                      position: 'absolute',
+                      top: '2px',
+                      left: showStablecoins ? '22px' : '2px',
+                      transition: 'left 0.2s',
+                      boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
+                    }}></div>
+                  </div>
+                  <span>Show Stablecoins ?</span>
+                </label>
+                <span style={{ fontSize: '12px', color: '#737373', marginLeft: '52px' }}>
+                  {hiddenByStablecoins} hidden
+                </span>
+              </div>
+            </div>
+          )}
+          
+          <div style={{ position: 'relative', flex: '1', maxWidth: '400px', display: 'flex', marginLeft: 'auto' }}>
+            <input 
+              type="text" 
+              placeholder={activeTab === 'all' ? "Search (e.g. BTC, Pepe)..." : "Search..."} 
+              value={searchQuery} 
+              onChange={e => setSearchQuery(e.target.value)} 
+              style={{ 
+                padding: '10px 14px 10px 36px', 
+                borderRadius: '8px', 
+                border: '1px solid #e5e5e5', 
+                fontSize: '14px', 
+                flex: '1', 
+                outline: 'none',
+                transition: 'border-color 0.2s'
+              }}
+              onFocus={(e) => e.target.style.borderColor = '#2563eb'}
+              onBlur={(e) => e.target.style.borderColor = '#e5e5e5'}
+            />
+            <span style={{
+              position: 'absolute',
+              left: '12px',
+              top: '50%',
+              transform: 'translateY(-50%)',
+              fontSize: '16px',
+              color: '#9ca3af'
+            }}>🔍</span>
+          </div>
+          
           {activeTab === 'trends' && (
             <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
               {[['all', 'All'], ['hot', '🔥 Hot'], ['cross', '✓ Cross'], ['pop', '🎬 Pop'], ['crypto', '🪙 Crypto'], ['tech', '💻 Tech']].map(([key, label]) => (
@@ -473,7 +724,197 @@ export default function App() {
           </div>
         )}
 
-        {(activeTab === 'all' || activeTab === 'memes') && (
+        {activeTab === 'all' && (
+          <div style={{ backgroundColor: 'white', borderRadius: '12px', border: '1px solid #e5e5e5', overflow: 'hidden' }}>
+            {loading && !currentData.length ? <div style={{ padding: '50px', textAlign: 'center', color: '#737373' }}>Loading...</div> : (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ backgroundColor: '#fafafa', borderBottom: '1px solid #e5e5e5' }}>
+                      <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: '11px', fontWeight: '600', color: '#737373', textTransform: 'uppercase', letterSpacing: '0.05em', width: '60px' }}>#</th>
+                      <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: '11px', fontWeight: '600', color: '#737373', textTransform: 'uppercase', letterSpacing: '0.05em' }}>^</th>
+                      <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: '11px', fontWeight: '600', color: '#737373', textTransform: 'uppercase', letterSpacing: '0.05em' }}>ASSET</th>
+                      <th style={{ padding: '12px 16px', textAlign: 'right', fontSize: '11px', fontWeight: '600', color: '#737373', textTransform: 'uppercase', letterSpacing: '0.05em' }}>PRICE</th>
+                      <th style={{ padding: '12px 16px', textAlign: 'right', fontSize: '11px', fontWeight: '600', color: '#737373', textTransform: 'uppercase', letterSpacing: '0.05em' }}>24H %</th>
+                      <th style={{ padding: '12px 16px', textAlign: 'right', fontSize: '11px', fontWeight: '600', color: '#737373', textTransform: 'uppercase', letterSpacing: '0.05em' }}>FDV</th>
+                      <th style={{ padding: '12px 16px', textAlign: 'center', fontSize: '11px', fontWeight: '600', color: '#737373', textTransform: 'uppercase', letterSpacing: '0.05em', position: 'relative' }}>
+                        DELTA
+                        <span style={{ display: 'inline-block', marginLeft: '4px', cursor: 'help', fontSize: '12px' }}>?</span>
+                      </th>
+                      <th style={{ padding: '12px 16px', textAlign: 'right', fontSize: '11px', fontWeight: '600', color: '#737373', textTransform: 'uppercase', letterSpacing: '0.05em', position: 'relative' }}>
+                        CIRC %
+                        <span style={{ display: 'inline-block', marginLeft: '4px', cursor: 'help', fontSize: '12px' }}>?</span>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredData.map((coin, index) => {
+                      const isPositive = coin.priceChange24h >= 0;
+                      const deltaValue = coin.delta !== null && coin.delta !== 0 ? coin.delta : null;
+                      const circPercent = coin.circPercent || 0;
+                      const circColor = circPercent >= 90 ? '#22c55e' : circPercent >= 70 ? '#f59e0b' : '#f97316';
+                      
+                      return (
+                        <tr 
+                          key={coin.id} 
+                          style={{ 
+                            borderBottom: '1px solid #f5f5f5',
+                            transition: 'background-color 0.1s'
+                          }}
+                          onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#fafafa'}
+                          onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                        >
+                          <td style={{ padding: '16px', fontSize: '13px', color: '#737373' }}>
+                            {coin.rank || index + 1}
+                          </td>
+                          <td style={{ padding: '16px', fontSize: '13px', color: '#737373' }}>
+                            {/* Sort indicator placeholder */}
+                          </td>
+                          <td style={{ padding: '16px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                              {coin.image ? (
+                                <img 
+                                  src={coin.image} 
+                                  alt={coin.name}
+                                  style={{ 
+                                    width: '32px', 
+                                    height: '32px', 
+                                    borderRadius: '50%' 
+                                  }}
+                                  onError={(e) => {
+                                    e.target.style.display = 'none';
+                                    e.target.nextSibling.style.display = 'flex';
+                                  }}
+                                />
+                              ) : null}
+                              <div style={{
+                                width: '32px',
+                                height: '32px',
+                                borderRadius: '50%',
+                                backgroundColor: '#f3f4f6',
+                                display: coin.image ? 'none' : 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                fontSize: '14px',
+                                fontWeight: '600',
+                                color: '#6b7280'
+                              }}>
+                                {coin.symbol?.[0] || coin.name?.[0] || '?'}
+                              </div>
+                              <div>
+                                <div style={{ 
+                                  fontWeight: '600', 
+                                  color: '#171717', 
+                                  fontSize: '14px',
+                                  marginBottom: '2px'
+                                }}>
+                                  {coin.name}
+                                </div>
+                                <div style={{ 
+                                  fontSize: '12px', 
+                                  color: '#737373' 
+                                }}>
+                                  {coin.symbol}
+                                </div>
+                              </div>
+                            </div>
+                          </td>
+                          <td style={{ 
+                            padding: '16px', 
+                            textAlign: 'right', 
+                            fontWeight: '500', 
+                            fontSize: '14px',
+                            color: '#171717'
+                          }}>
+                            {formatPrice(coin.price)}
+                          </td>
+                          <td style={{ 
+                            padding: '16px', 
+                            textAlign: 'right', 
+                            fontWeight: '500', 
+                            fontSize: '14px',
+                            color: isPositive ? '#22c55e' : '#ef4444'
+                          }}>
+                            {formatPercent(coin.priceChange24h)}
+                          </td>
+                          <td style={{ padding: '16px', textAlign: 'right' }}>
+                            <div style={{ fontSize: '14px', fontWeight: '500', color: '#171717' }}>
+                              {formatLargeNumber(coin.fdv || coin.marketCap)}
+                            </div>
+                            {coin.reportedMarketCap && coin.fdv && Math.abs(coin.reportedMarketCap - coin.fdv) > 1000000 && (
+                              <div style={{ fontSize: '11px', color: '#737373', marginTop: '2px' }}>
+                                Reported: {formatLargeNumber(coin.reportedMarketCap)}
+                              </div>
+                            )}
+                          </td>
+                          <td style={{ padding: '16px', textAlign: 'center' }}>
+                            {deltaValue !== null ? (
+                              <span style={{
+                                display: 'inline-block',
+                                padding: '4px 8px',
+                                borderRadius: '4px',
+                                backgroundColor: deltaValue > 0 ? '#dcfce7' : deltaValue < 0 ? '#fee2e2' : '#f5f5f5',
+                                color: deltaValue > 0 ? '#16a34a' : deltaValue < 0 ? '#dc2626' : '#737373',
+                                fontSize: '12px',
+                                fontWeight: '600'
+                              }}>
+                                {deltaValue > 0 ? '+' : ''}{deltaValue}
+                              </span>
+                            ) : (
+                              <span style={{ color: '#d1d5db' }}>-</span>
+                            )}
+                          </td>
+                          <td style={{ padding: '16px', textAlign: 'right' }}>
+                            <div style={{ 
+                              display: 'flex', 
+                              alignItems: 'center', 
+                              justifyContent: 'flex-end',
+                              gap: '8px'
+                            }}>
+                              <span style={{ 
+                                fontSize: '13px', 
+                                fontWeight: '500',
+                                color: '#171717',
+                                minWidth: '45px',
+                                textAlign: 'right'
+                              }}>
+                                {circPercent !== null && circPercent !== undefined && !isNaN(circPercent) ? `${circPercent.toFixed(1)}%` : '-'}
+                              </span>
+                              {circPercent > 0 && (
+                                <div style={{
+                                  width: '60px',
+                                  height: '6px',
+                                  backgroundColor: '#f3f4f6',
+                                  borderRadius: '3px',
+                                  overflow: 'hidden'
+                                }}>
+                                  <div style={{
+                                    width: `${Math.min(100, circPercent)}%`,
+                                    height: '100%',
+                                    backgroundColor: circColor,
+                                    transition: 'width 0.3s'
+                                  }}></div>
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                
+                {filteredData.length === 0 && (
+                  <div style={{ padding: '40px', textAlign: 'center', color: '#737373' }}>
+                    No coins found matching your filters.
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === 'memes' && (
           <div style={{ backgroundColor: 'white', borderRadius: '14px', border: '1px solid #e5e5e5', overflow: 'hidden' }}>
             {loading && !currentData.length ? <div style={{ padding: '50px', textAlign: 'center', color: '#737373' }}>Loading...</div> : (
               <div style={{ overflowX: 'auto' }}>
@@ -482,7 +923,6 @@ export default function App() {
                     <div>#</div><div>Token</div><div style={{ textAlign: 'right' }}>Price</div><div style={{ textAlign: 'right' }}>24h</div><div style={{ textAlign: 'right' }}>Vol</div><div style={{ textAlign: 'right' }}>MCap</div><div style={{ textAlign: 'center' }}>Score</div>
                   </div>
                   {filteredData.map((t, i) => {
-                    const signal = getSignalLabel(t.signalScore);
                     const viral = getViralLabel(t.viralScore);
                     const chain = getChainBadge(t.chain);
                     return (
@@ -491,7 +931,7 @@ export default function App() {
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                           {t.image ? <img src={t.image} alt="" style={{ width: '26px', height: '26px', borderRadius: '50%' }} onError={e => e.target.style.display='none'} /> : <div style={{ width: '26px', height: '26px', borderRadius: '50%', backgroundColor: '#f0f0f0', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: '600' }}>{t.symbol?.[0]}</div>}
                           <div>
-                            <div style={{ fontWeight: '600', color: '#171717', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '4px' }}>{t.name?.slice(0, 14)}{activeTab === 'memes' && t.chain && <span style={{ backgroundColor: chain.b, color: chain.c, padding: '1px 4px', borderRadius: '3px', fontSize: '8px', fontWeight: '600' }}>{chain.l}</span>}</div>
+                            <div style={{ fontWeight: '600', color: '#171717', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '4px' }}>{t.name?.slice(0, 14)}{t.chain && <span style={{ backgroundColor: chain.b, color: chain.c, padding: '1px 4px', borderRadius: '3px', fontSize: '8px', fontWeight: '600' }}>{chain.l}</span>}</div>
                             <div style={{ fontSize: '10px', color: '#a3a3a3' }}>{t.symbol}</div>
                           </div>
                         </div>
@@ -500,7 +940,7 @@ export default function App() {
                         <div style={{ textAlign: 'right', fontSize: '11px', color: '#525252' }}>{formatLargeNumber(t.volume24h)}</div>
                         <div style={{ textAlign: 'right', fontSize: '11px', color: '#525252' }}>{formatLargeNumber(t.marketCap)}</div>
                         <div style={{ textAlign: 'center' }}>
-                          {activeTab === 'memes' ? <span style={{ backgroundColor: viral.bg, color: viral.color, padding: '3px 6px', borderRadius: '4px', fontSize: '9px', fontWeight: '600' }}>{viral.label}</span> : <span style={{ backgroundColor: signal.bg, color: signal.color, padding: '3px 6px', borderRadius: '4px', fontSize: '10px', fontWeight: '600' }}>{t.signalScore}</span>}
+                          <span style={{ backgroundColor: viral.bg, color: viral.color, padding: '3px 6px', borderRadius: '4px', fontSize: '9px', fontWeight: '600' }}>{viral.label}</span>
                         </div>
                       </div>
                     );
