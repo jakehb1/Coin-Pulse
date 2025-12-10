@@ -310,14 +310,27 @@ export default function App() {
     }
   }, [loadingMore, hasMore, page, fetchTrends, searchQuery, launchFilter]);
 
-  // Intersection Observer for infinite scroll
+  // Load more memes
+  const loadMoreMemes = useCallback(() => {
+    if (!memeLoadingMore && hasMore && !searchQuery.trim() && activeTab === 'memes') {
+      const nextPage = memePage + 1;
+      setMemePage(nextPage);
+      fetchMemes(nextPage, true);
+    }
+  }, [memeLoadingMore, hasMore, memePage, fetchMemes, searchQuery, activeTab]);
+
+  // Intersection Observer for infinite scroll (trends and memes)
   useEffect(() => {
     if (observerRef.current) observerRef.current.disconnect();
     
     observerRef.current = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting && hasMore && !loadingMore && activeTab === 'trends') {
-          loadMoreTrends();
+        if (entries[0].isIntersecting && hasMore && !loadingMore && !memeLoadingMore) {
+          if (activeTab === 'trends') {
+            loadMoreTrends();
+          } else if (activeTab === 'memes') {
+            loadMoreMemes();
+          }
         }
       },
       { threshold: 0.1, rootMargin: '100px' }
@@ -330,7 +343,7 @@ export default function App() {
     return () => {
       if (observerRef.current) observerRef.current.disconnect();
     };
-  }, [hasMore, loadingMore, loadMoreTrends, activeTab]);
+  }, [hasMore, loadingMore, memeLoadingMore, loadMoreTrends, loadMoreMemes, activeTab]);
 
   // Reset pagination when filters change
   useEffect(() => {
@@ -675,45 +688,163 @@ export default function App() {
     setData(FALLBACK_COINS.map(c => generateFlowData(c, false)));
   }, []);
 
-  const fetchMemes = useCallback(async () => {
+  const fetchMemes = useCallback(async (pageNum = 1, append = false) => {
     try {
-      // Add timestamp to prevent caching and ensure live data
-      const timestamp = Date.now();
-      const res = await fetch(`${DEXSCREENER_API}/token-boosts/top/v1?_t=${timestamp}`, { 
-        signal: AbortSignal.timeout(10000),
-        cache: 'no-cache',
-        headers: {
-          'Cache-Control': 'no-cache, no-store, must-revalidate',
-          'Pragma': 'no-cache'
+      setMemeLoadingMore(true);
+      
+      // Fetch from multiple sources: DexScreener + Pump.fun
+      const [dexData, pumpData] = await Promise.allSettled([
+        // DexScreener - get top boosted tokens
+        (async () => {
+          const timestamp = Date.now();
+          const res = await fetch(`${DEXSCREENER_API}/token-boosts/top/v1?_t=${timestamp}`, { 
+            signal: AbortSignal.timeout(10000),
+            cache: 'no-cache',
+            headers: {
+              'Cache-Control': 'no-cache, no-store, must-revalidate',
+              'Pragma': 'no-cache'
+            }
+          });
+          if (res.ok) {
+            const boosts = await res.json();
+            if (boosts?.length > 0) {
+              // Fetch details for top 50 tokens
+              const topTokens = boosts.slice(0, 50);
+              const pairs = await Promise.all(
+                topTokens.map(async t => {
+                  try { 
+                    const tokenTimestamp = Date.now();
+                    const r = await fetch(`${DEXSCREENER_API}/latest/dex/tokens/${t.tokenAddress}?_t=${tokenTimestamp}`, {
+                      cache: 'no-cache',
+                      headers: {
+                        'Cache-Control': 'no-cache, no-store, must-revalidate'
+                      }
+                    }); 
+                    const d = await r.json(); 
+                    return d.pairs?.[0] ? { 
+                      id: d.pairs[0].baseToken?.address, 
+                      symbol: d.pairs[0].baseToken?.symbol, 
+                      name: d.pairs[0].baseToken?.name, 
+                      price: parseFloat(d.pairs[0].priceUsd || 0), 
+                      priceChange24h: parseFloat(d.pairs[0].priceChange?.h24 || 0), 
+                      marketCap: parseFloat(d.pairs[0].fdv || 0), 
+                      volume24h: parseFloat(d.pairs[0].volume?.h24 || 0), 
+                      chain: d.pairs[0].chainId,
+                      source: 'dexscreener'
+                    } : null; 
+                  } catch { return null; }
+                })
+              );
+              return pairs.filter(Boolean);
+            }
+          }
+          return [];
+        })(),
+        
+        // Pump.fun - get trending meme coins
+        (async () => {
+          try {
+            const offset = (pageNum - 1) * memePageSize;
+            const res = await fetch(`/api/pumpfun?limit=${memePageSize}&offset=${offset}`, {
+              cache: 'no-cache',
+              headers: {
+                'Cache-Control': 'no-cache, no-store, must-revalidate'
+              }
+            });
+            if (res.ok) {
+              const data = await res.json();
+              const coins = Array.isArray(data.coins) ? data.coins : Array.isArray(data) ? data : [];
+              return coins.map(coin => ({
+                id: coin.id || coin.mint || coin.address,
+                symbol: coin.symbol || 'UNKNOWN',
+                name: coin.name || coin.symbol || 'Unknown',
+                price: coin.price || 0,
+                priceChange24h: coin.priceChange24h || 0,
+                marketCap: coin.marketCap || 0,
+                volume24h: coin.volume24h || 0,
+                chain: coin.chain || 'solana',
+                image: coin.image || null,
+                source: 'pumpfun'
+              }));
+            }
+            return [];
+          } catch (err) {
+            console.warn('[DEBUG] Pump.fun API error:', err);
+            return [];
+          }
+        })()
+      ]);
+      
+      const dexCoins = dexData.status === 'fulfilled' ? dexData.value : [];
+      const pumpCoins = pumpData.status === 'fulfilled' ? pumpData.value : [];
+      
+      // Combine and deduplicate by address/id
+      const allCoins = [...dexCoins, ...pumpCoins];
+      const uniqueCoins = new Map();
+      allCoins.forEach(coin => {
+        const key = coin.id?.toLowerCase();
+        if (key && !uniqueCoins.has(key)) {
+          uniqueCoins.set(key, coin);
         }
       });
-      if (res.ok) {
-        const boosts = await res.json();
-        if (boosts?.length > 3) {
-          const pairs = await Promise.all(boosts.slice(0, 15).map(async t => {
-            try { 
-              const tokenTimestamp = Date.now();
-              const r = await fetch(`${DEXSCREENER_API}/latest/dex/tokens/${t.tokenAddress}?_t=${tokenTimestamp}`, {
-                cache: 'no-cache',
-                headers: {
-                  'Cache-Control': 'no-cache, no-store, must-revalidate'
-                }
-              }); 
-              const d = await r.json(); 
-              return d.pairs?.[0] ? { id: d.pairs[0].baseToken?.address, symbol: d.pairs[0].baseToken?.symbol, name: d.pairs[0].baseToken?.name, price: parseFloat(d.pairs[0].priceUsd || 0), priceChange24h: parseFloat(d.pairs[0].priceChange?.h24 || 0), marketCap: parseFloat(d.pairs[0].fdv || 0), volume24h: parseFloat(d.pairs[0].volume?.h24 || 0), chain: d.pairs[0].chainId } : null; 
-            } catch { return null; }
-          }));
-          const valid = pairs.filter(Boolean);
-          if (valid.length > 3) { setMemeData(valid.map(p => generateFlowData(p, true))); return; }
-        }
+      
+      const combinedCoins = Array.from(uniqueCoins.values());
+      const processedCoins = combinedCoins.map(p => generateFlowData(p, true));
+      
+      // Sort by signal score (viral score for memes)
+      processedCoins.sort((a, b) => (b.signalScore || 0) - (a.signalScore || 0));
+      
+      if (append) {
+        // Append to cache and displayed data
+        setAllMemesCache(prev => {
+          const combined = [...prev, ...processedCoins];
+          const unique = new Map();
+          combined.forEach(coin => {
+            const key = coin.id?.toLowerCase();
+            if (key && !unique.has(key)) {
+              unique.set(key, coin);
+            }
+          });
+          return Array.from(unique.values());
+        });
+        setMemeData(prev => {
+          const combined = [...prev, ...processedCoins];
+          const unique = new Map();
+          combined.forEach(coin => {
+            const key = coin.id?.toLowerCase();
+            if (key && !unique.has(key)) {
+              unique.set(key, coin);
+            }
+          });
+          return Array.from(unique.values());
+        });
+      } else {
+        // First load - set both cache and displayed data
+        setAllMemesCache(processedCoins);
+        setMemeData(processedCoins);
       }
-    } catch {}
-    setMemeData(FALLBACK_MEMES.map(c => generateFlowData(c, true)));
-  }, []);
+      
+      // Check if we should load more (pump.fun returns less than page size = no more)
+      if (pumpCoins.length < memePageSize && dexCoins.length === 0) {
+        setHasMore(false);
+      } else {
+        setHasMore(true);
+      }
+      
+      console.log(`[DEBUG] Fetched ${processedCoins.length} meme coins (Dex: ${dexCoins.length}, Pump: ${pumpCoins.length})`);
+    } catch (err) {
+      console.error('[DEBUG] Memes fetch error:', err);
+      if (!append) {
+        setMemeData(FALLBACK_MEMES.map(c => generateFlowData(c, true)));
+      }
+    } finally {
+      setMemeLoadingMore(false);
+    }
+  }, [memePageSize]);
 
   useEffect(() => {
     setLoading(true);
-    Promise.all([fetchCoins(), fetchMemes(), fetchTrends(1, false)]).finally(() => setLoading(false));
+    Promise.all([fetchCoins(), fetchMemes(1, false), fetchTrends(1, false)]).finally(() => setLoading(false));
   }, [fetchCoins, fetchMemes, fetchTrends]);
 
   // Refresh coins when switching back to coins tab to ensure accurate prices
@@ -746,7 +877,9 @@ export default function App() {
       fetchTrends(1, false);
       }
       if (activeTab === 'memes') {
-      fetchMemes();
+        setMemePage(1);
+        setHasMore(true);
+        fetchMemes(1, false);
       }
     }, 120000); // 2 minutes for trends/memes
     
@@ -769,8 +902,17 @@ export default function App() {
 
   const currentData = activeTab === 'memes' ? memeData : data;
   const filteredData = useMemo(() => {
-    let d = [...currentData];
-    if (searchQuery.trim()) d = d.filter(c => (c.name || '').toLowerCase().includes(searchQuery.toLowerCase()) || (c.symbol || '').toLowerCase().includes(searchQuery.toLowerCase()));
+    // For memes, search in the full cache, not just displayed data
+    const dataToFilter = activeTab === 'memes' && searchQuery.trim() ? allMemesCache : currentData;
+    let d = [...dataToFilter];
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      d = d.filter(c => 
+        (c.name || '').toLowerCase().includes(query) || 
+        (c.symbol || '').toLowerCase().includes(query) ||
+        (c.id || '').toLowerCase().includes(query)
+      );
+    }
     
     // Apply filters for coins tab
     if (activeTab === 'all') {
@@ -863,12 +1005,19 @@ export default function App() {
 
   // Handle refresh button
   const handleRefresh = () => {
-    setPage(1);
-    setHasMore(true);
-    setTrends([]);
-    fetchTrends(1, false);
+    if (activeTab === 'trends') {
+      setPage(1);
+      setHasMore(true);
+      setTrends([]);
+      fetchTrends(1, false);
+    } else if (activeTab === 'memes') {
+      setMemePage(1);
+      setHasMore(true);
+      setAllMemesCache([]);
+      setMemeData([]);
+      fetchMemes(1, false);
+    }
     fetchCoins();
-    fetchMemes();
   };
 
   return (
@@ -1583,6 +1732,7 @@ export default function App() {
                     <div>#</div><div>Token</div><div style={{ textAlign: 'right' }}>Price</div><div style={{ textAlign: 'right' }}>24h</div><div style={{ textAlign: 'right' }}>Vol</div><div style={{ textAlign: 'right' }}>MCap</div><div style={{ textAlign: 'center' }}>Score</div>
                   </div>
                   {filteredData.map((t, i) => {
+                    const isLastItem = i === filteredData.length - 1 && !searchQuery.trim();
                     const viral = getViralLabel(t.viralScore);
                     const chain = getChainBadge(t.chain);
                     return (
@@ -1605,6 +1755,18 @@ export default function App() {
                       </div>
                     );
                   })}
+                  
+                  {/* Infinite scroll sentinel for memes */}
+                  {!searchQuery.trim() && (
+                    <div ref={loadMoreRef} style={{ padding: '20px', textAlign: 'center' }}>
+                      {memeLoadingMore && <div style={{ color: '#737373' }}>Loading more memes...</div>}
+                      {!hasMore && filteredData.length > 0 && (
+                        <div style={{ color: '#a3a3a3', fontSize: '13px', padding: '20px' }}>
+                          ✓ All {allMemesCache.length} meme coins loaded
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             )}
