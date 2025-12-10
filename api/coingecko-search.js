@@ -10,20 +10,17 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { vs_currency = 'usd', per_page = '100', page = '1', ids } = req.query;
+    const { query } = req.query;
+    
+    if (!query) {
+      return res.status(400).json({ error: 'Search query is required' });
+    }
+
     const timestamp = Date.now();
     const random = Math.random();
     
-    // Build URL - support both general markets and search by IDs
-    let url = `https://api.coingecko.com/api/v3/coins/markets?vs_currency=${vs_currency}&sparkline=false&price_change_percentage=24h&_t=${timestamp}&_r=${random}`;
-    
-    if (ids) {
-      // Search mode - fetch specific coins by IDs
-      url += `&ids=${ids}&per_page=${per_page}`;
-    } else {
-      // Normal mode - fetch top coins
-      url += `&order=market_cap_desc&per_page=${per_page}&page=${page}`;
-    }
+    // Proxy request to CoinGecko search API
+    const url = `https://api.coingecko.com/api/v3/search?query=${encodeURIComponent(query)}&_t=${timestamp}&_r=${random}`;
     
     const response = await fetch(url, {
       cache: 'no-store',
@@ -46,7 +43,7 @@ export default async function handler(req, res) {
     res.setHeader('Expires', '0');
     res.status(200).json(data);
   } catch (error) {
-    console.error('CoinGecko markets API error:', error);
+    console.error('CoinGecko search API error:', error);
     res.status(500).json({ error: error.message });
   }
 }

@@ -230,6 +230,11 @@ export default function App() {
   
   // Memes caching for search
   const [allMemesCache, setAllMemesCache] = useState([]); // Cache all fetched memes for search
+  
+  // Search results state
+  const [searchResults, setSearchResults] = useState([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const searchTimeoutRef = useRef(null);
 
   // Fetch trends with pagination
   const fetchTrends = useCallback(async (pageNum = 1, append = false) => {
@@ -679,6 +684,125 @@ export default function App() {
     setData(FALLBACK_COINS.map(c => generateFlowData(c, false)));
   }, []);
 
+  // Search function - fetches data from API when search query is entered
+  const performSearch = useCallback(async (query) => {
+    if (!query || !query.trim()) {
+      setSearchResults([]);
+      return;
+    }
+
+    setSearchLoading(true);
+    const searchQuery = query.trim().toLowerCase();
+
+    try {
+      if (activeTab === 'all') {
+        // Search coins using CoinGecko search API
+        const searchUrl = typeof window !== 'undefined'
+          ? `/api/coingecko-search?query=${encodeURIComponent(searchQuery)}`
+          : `${COINGECKO_API}/search?query=${encodeURIComponent(searchQuery)}`;
+        
+        const res = await fetch(searchUrl, {
+          cache: 'no-store',
+          headers: {
+            'Cache-Control': 'no-cache, no-store, must-revalidate, max-age=0',
+            'Pragma': 'no-cache'
+          }
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          const coinIds = (data.coins || []).slice(0, 20).map(c => c.id);
+          
+          if (coinIds.length > 0) {
+            // Fetch market data for searched coins
+            const marketsUrl = typeof window !== 'undefined'
+              ? `/api/coingecko-markets?ids=${coinIds.join(',')}&vs_currency=usd&per_page=20`
+              : `${COINGECKO_API}/coins/markets?vs_currency=usd&ids=${coinIds.join(',')}&per_page=20&sparkline=false&price_change_percentage=24h`;
+            
+            const marketsRes = await fetch(marketsUrl, {
+              cache: 'no-store',
+              headers: {
+                'Cache-Control': 'no-cache, no-store, must-revalidate, max-age=0',
+                'Pragma': 'no-cache'
+              }
+            });
+
+            if (marketsRes.ok) {
+              const coins = await marketsRes.json();
+              const processed = coins.map(c => generateFlowData(c, false));
+              setSearchResults(processed);
+            } else {
+              setSearchResults([]);
+            }
+          } else {
+            setSearchResults([]);
+          }
+        } else {
+          setSearchResults([]);
+        }
+      } else if (activeTab === 'memes') {
+        // Search memes using DexScreener search
+        const searchUrl = `${DEXSCREENER_API}/v1/search?q=${encodeURIComponent(searchQuery)}`;
+        const res = await fetch(searchUrl, {
+          cache: 'no-cache',
+          headers: {
+            'Cache-Control': 'no-cache, no-store, must-revalidate'
+          }
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          const pairs = (data.pairs || []).slice(0, 20);
+          const processed = pairs.map(p => ({
+            id: p.baseToken?.address,
+            symbol: p.baseToken?.symbol,
+            name: p.baseToken?.name,
+            price: parseFloat(p.priceUsd || 0),
+            priceChange24h: parseFloat(p.priceChange?.h24 || 0),
+            marketCap: parseFloat(p.fdv || 0),
+            volume24h: parseFloat(p.volume?.h24 || 0),
+            chain: p.chainId
+          })).filter(Boolean).map(p => generateFlowData(p, true));
+          
+          setSearchResults(processed);
+        } else {
+          setSearchResults([]);
+        }
+      } else if (activeTab === 'trends') {
+        // For trends, filter existing data (no API search available)
+        setSearchResults([]);
+      }
+    } catch (err) {
+      console.error('[DEBUG] Search error:', err);
+      setSearchResults([]);
+    } finally {
+      setSearchLoading(false);
+    }
+  }, [activeTab]);
+
+  // Debounced search effect
+  useEffect(() => {
+    // Clear previous timeout
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+    }
+
+    if (searchQuery.trim()) {
+      // Debounce search by 500ms
+      searchTimeoutRef.current = setTimeout(() => {
+        performSearch(searchQuery);
+      }, 500);
+    } else {
+      setSearchResults([]);
+    }
+
+    return () => {
+      if (searchTimeoutRef.current) {
+        clearTimeout(searchTimeoutRef.current);
+      }
+    };
+  }, [searchQuery, performSearch]);
+
   const fetchMemes = useCallback(async () => {
     try {
       // Add timestamp to prevent caching and ensure live data
@@ -780,17 +904,8 @@ export default function App() {
 
   const currentData = activeTab === 'memes' ? memeData : data;
   const filteredData = useMemo(() => {
-    // For memes, search in the full cache, not just displayed data
-    const dataToFilter = activeTab === 'memes' && searchQuery.trim() ? allMemesCache : currentData;
-    let d = [...dataToFilter];
-    if (searchQuery.trim()) {
-      const query = searchQuery.toLowerCase();
-      d = d.filter(c => 
-        (c.name || '').toLowerCase().includes(query) || 
-        (c.symbol || '').toLowerCase().includes(query) ||
-        (c.id || '').toLowerCase().includes(query)
-      );
-    }
+    // If searching, use search results; otherwise use current data
+    let d = searchQuery.trim() ? [...searchResults] : [...currentData];
     
     // Apply filters for coins tab
     if (activeTab === 'all') {
@@ -855,7 +970,7 @@ export default function App() {
     }
     
     return d;
-  }, [currentData, searchQuery, activeTab, filterNoise, showStablecoins, sortColumn, sortDirection]);
+  }, [currentData, searchQuery, activeTab, filterNoise, showStablecoins, sortColumn, sortDirection, searchResults]);
   
   // Handle column sorting
   const handleSort = (column) => {
@@ -1052,7 +1167,7 @@ export default function App() {
           <div className="mobile-full-width" style={{ position: 'relative', flex: '1', maxWidth: '400px', display: 'flex', marginLeft: 'auto' }}>
             <input 
               type="text" 
-              placeholder={activeTab === 'all' ? "Search (e.g. BTC, Pepe)..." : "Search..."} 
+              placeholder={activeTab === 'all' ? "Search (e.g. BTC, Pepe)..." : activeTab === 'memes' ? "Search meme coins..." : "Search..."} 
               value={searchQuery} 
               onChange={e => setSearchQuery(e.target.value)} 
               style={{ 
@@ -1076,7 +1191,9 @@ export default function App() {
               fontSize: '16px',
               color: '#9ca3af',
               pointerEvents: 'none'
-            }}>🔍</span>
+            }}>
+              {searchLoading ? '⏳' : '🔍'}
+            </span>
           </div>
           
           {activeTab === 'trends' && (
@@ -1586,7 +1703,11 @@ export default function App() {
                 
                 {filteredData.length === 0 && (
                   <div style={{ padding: '40px', textAlign: 'center', color: '#737373' }}>
-                    No coins found matching your filters.
+                    {searchQuery.trim() ? (
+                      searchLoading ? 'Searching...' : 'No results found. Try a different search term.'
+                    ) : (
+                      'No coins found matching your filters.'
+                    )}
                   </div>
                 )}
               </div>
