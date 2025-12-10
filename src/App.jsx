@@ -729,7 +729,16 @@ export default function App() {
 
             if (marketsRes.ok) {
               const coins = await marketsRes.json();
-              const processed = coins.map(c => generateFlowData(c, false));
+              const processed = coins.map((c, index) => {
+                const baseData = generateFlowData(c, false);
+                // Check if stablecoin
+                const isStablecoin = ['usdt', 'usdc', 'dai', 'busd', 'tusd', 'usdp', 'usdd', 'frax', 'lusd', 'susd', 'gusd', 'husd', 'ousd', 'usdn', 'usdk', 'usdx', 'usd', 'ust', 'mim'].includes(c.id?.toLowerCase() || c.symbol?.toLowerCase() || '');
+                return {
+                  ...baseData,
+                  isStablecoin: isStablecoin,
+                  rank: c.market_cap_rank || (index + 1)
+                };
+              });
               setSearchResults(processed);
             } else {
               setSearchResults([]);
@@ -987,14 +996,18 @@ export default function App() {
     return sortDirection === 'asc' ? '↑' : '↓';
   };
   
-  // Count hidden coins
+  // Count hidden coins (from current data, not search results)
   const hiddenByNoise = useMemo(() => {
-    return data.filter(coin => coin.marketCap < 10000000).length;
-  }, [data]);
+    if (activeTab !== 'all') return 0;
+    const dataToCount = searchQuery.trim() ? searchResults : data;
+    return dataToCount.filter(coin => coin.marketCap < 10000000).length;
+  }, [data, searchResults, activeTab, searchQuery]);
 
   const hiddenByStablecoins = useMemo(() => {
-    return data.filter(coin => coin.isStablecoin).length;
-  }, [data]);
+    if (activeTab !== 'all') return 0;
+    const dataToCount = searchQuery.trim() ? searchResults : data;
+    return dataToCount.filter(coin => coin.isStablecoin).length;
+  }, [data, searchResults, activeTab, searchQuery]);
 
   // Handle refresh button
   const handleRefresh = () => {
