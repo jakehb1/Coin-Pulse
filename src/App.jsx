@@ -377,7 +377,10 @@ export default function App() {
                     supplyDataMap.set(id, {
                       totalSupply: detailData.market_data?.total_supply,
                       circulatingSupply: detailData.market_data?.circulating_supply,
-                      marketCap: detailData.market_data?.market_cap?.usd
+                      marketCap: detailData.market_data?.market_cap?.usd,
+                      // Use price from detail API as it's more recent and accurate
+                      currentPrice: detailData.market_data?.current_price?.usd,
+                      priceChange24h: detailData.market_data?.price_change_percentage_24h
                     });
                   }
                 } catch {}
@@ -392,8 +395,10 @@ export default function App() {
           const enhancedCoins = coins.map((coin, index) => {
             const supplyData = supplyDataMap.get(coin.id);
             
-            // Use actual API data - prefer detail API, fallback to markets API
-            const currentPrice = coin.current_price || 0;
+            // Use actual API data - prefer detail API (more recent), fallback to markets API
+            // Detail API prices are fetched more recently and are more accurate
+            const currentPrice = supplyData?.currentPrice || coin.current_price || 0;
+            const priceChange24h = supplyData?.priceChange24h !== undefined ? supplyData.priceChange24h : coin.price_change_percentage_24h || 0;
             const marketCap = coin.market_cap || 0;
             
             // Get supply data from detail API (most accurate)
@@ -431,9 +436,18 @@ export default function App() {
             // Check if stablecoin
             const isStablecoin = ['usdt', 'usdc', 'dai', 'busd', 'tusd', 'usdp', 'usdd', 'frax', 'lusd', 'susd', 'gusd', 'husd', 'ousd', 'usdn', 'usdk', 'usdx', 'usd', 'ust', 'mim'].includes(coin.id?.toLowerCase() || coin.symbol?.toLowerCase() || '');
             
-            const baseData = generateFlowData(coin, false);
+            // Create updated coin object with most recent price data from detail API
+            const updatedCoin = {
+              ...coin,
+              current_price: currentPrice, // Use price from detail API if available (more recent)
+              price_change_percentage_24h: priceChange24h // Use 24h change from detail API if available
+            };
+            
+            const baseData = generateFlowData(updatedCoin, false);
             return {
               ...baseData,
+              price: currentPrice, // Ensure we use the most recent price
+              priceChange24h: priceChange24h, // Ensure we use the most recent 24h change
               fdv: fdv,
               reportedMarketCap: reportedMarketCap,
               circPercent: circPercent,
@@ -493,16 +507,25 @@ export default function App() {
     Promise.all([fetchCoins(), fetchMemes(), fetchTrends(1, false)]).finally(() => setLoading(false));
   }, [fetchCoins, fetchMemes, fetchTrends]);
 
-  // Auto-refresh every 2 minutes (reset to page 1)
+  // Auto-refresh: coins every 30 seconds (prices change frequently), trends every 2 minutes
   useEffect(() => {
-    const interval = setInterval(() => {
+    // Refresh coins more frequently for real-time prices
+    const coinsInterval = setInterval(() => {
+      fetchCoins();
+    }, 30000); // 30 seconds for coins
+    
+    // Refresh trends and memes less frequently
+    const trendsInterval = setInterval(() => {
       setPage(1);
       setHasMore(true);
       fetchTrends(1, false);
-      fetchCoins();
       fetchMemes();
-    }, 120000);
-    return () => clearInterval(interval);
+    }, 120000); // 2 minutes for trends/memes
+    
+    return () => {
+      clearInterval(coinsInterval);
+      clearInterval(trendsInterval);
+    };
   }, [fetchTrends, fetchCoins, fetchMemes]);
 
   const filteredTrends = useMemo(() => {
