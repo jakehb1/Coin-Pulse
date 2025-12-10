@@ -216,6 +216,8 @@ export default function App() {
   // Tooltip state
   const [showDeltaTooltip, setShowDeltaTooltip] = useState(false);
   const [showCircTooltip, setShowCircTooltip] = useState(false);
+  const deltaTooltipRef = useRef(null);
+  const circTooltipRef = useRef(null);
   
   // Infinite scroll state
   const [page, setPage] = useState(1);
@@ -341,12 +343,13 @@ export default function App() {
       const timestamp = Date.now();
       lastCoinsFetchRef.current = timestamp;
       
-      const res = await fetch(`${COINGECKO_API}/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=100&page=1&sparkline=false&price_change_percentage=24h&_t=${timestamp}`, { 
+      const res = await fetch(`${COINGECKO_API}/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=100&page=1&sparkline=false&price_change_percentage=24h&_t=${timestamp}&nocache=${Math.random()}`, { 
         signal: AbortSignal.timeout(20000),
-        cache: 'no-cache',
+        cache: 'no-store',
         headers: {
-          'Cache-Control': 'no-cache, no-store, must-revalidate',
-          'Pragma': 'no-cache'
+          'Cache-Control': 'no-cache, no-store, must-revalidate, max-age=0',
+          'Pragma': 'no-cache',
+          'Expires': '0'
         }
       });
       if (res.ok) {
@@ -364,12 +367,14 @@ export default function App() {
                   // Add timestamp to prevent caching
                   const detailTimestamp = Date.now();
                   const detailRes = await fetch(
-                    `${COINGECKO_API}/coins/${id}?localization=false&tickers=false&market_data=true&community_data=false&developer_data=false&sparkline=false&_t=${detailTimestamp}`,
+                    `${COINGECKO_API}/coins/${id}?localization=false&tickers=false&market_data=true&community_data=false&developer_data=false&sparkline=false&_t=${detailTimestamp}&nocache=${Math.random()}`,
                     { 
                       signal: AbortSignal.timeout(8000),
-                      cache: 'no-cache',
+                      cache: 'no-store',
                       headers: {
-                        'Cache-Control': 'no-cache, no-store, must-revalidate'
+                        'Cache-Control': 'no-cache, no-store, must-revalidate, max-age=0',
+                        'Pragma': 'no-cache',
+                        'Expires': '0'
                       }
                     }
                   );
@@ -554,12 +559,12 @@ export default function App() {
     // Refresh trends and memes less frequently
     const trendsInterval = setInterval(() => {
       if (activeTab === 'trends') {
-        setPage(1);
-        setHasMore(true);
-        fetchTrends(1, false);
+      setPage(1);
+      setHasMore(true);
+      fetchTrends(1, false);
       }
       if (activeTab === 'memes') {
-        fetchMemes();
+      fetchMemes();
       }
     }, 120000); // 2 minutes for trends/memes
     
@@ -933,9 +938,9 @@ export default function App() {
         )}
 
         {activeTab === 'all' && (
-          <div style={{ backgroundColor: 'white', borderRadius: '12px', border: '1px solid #e5e5e5', overflow: 'hidden' }}>
+          <div style={{ backgroundColor: 'white', borderRadius: '12px', border: '1px solid #e5e5e5', overflow: 'visible', position: 'relative' }}>
             {loading && !currentData.length ? <div style={{ padding: '50px', textAlign: 'center', color: '#737373' }}>Loading...</div> : (
-              <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+              <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch', position: 'relative' }}>
                 <style>{`
                   @media (max-width: 768px) {
                     .table-responsive th:nth-child(2),
@@ -1085,6 +1090,7 @@ export default function App() {
                       >
                         DELTA {getSortIcon('delta')}
                         <span 
+                          ref={deltaTooltipRef}
                           style={{ 
                             display: 'inline-block', 
                             marginLeft: '4px', 
@@ -1098,7 +1104,7 @@ export default function App() {
                           onClick={(e) => e.stopPropagation()}
                         >
                           ?
-                          {showDeltaTooltip && (
+                          {showDeltaTooltip && deltaTooltipRef.current && (
                             <div style={{
                               position: 'absolute',
                               bottom: '100%',
@@ -1111,9 +1117,11 @@ export default function App() {
                               fontSize: '11px',
                               borderRadius: '6px',
                               whiteSpace: 'nowrap',
-                              zIndex: 1000,
-                              boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
-                              pointerEvents: 'none'
+                              zIndex: 9999,
+                              boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
+                              pointerEvents: 'none',
+                              maxWidth: '250px',
+                              lineHeight: '1.4'
                             }}>
                               Rank change from previous update.<br />
                               Positive = moved up, Negative = moved down
@@ -1152,6 +1160,7 @@ export default function App() {
                       >
                         CIRC % {getSortIcon('circPercent')}
                         <span 
+                          ref={circTooltipRef}
                           style={{ 
                             display: 'inline-block', 
                             marginLeft: '4px', 
@@ -1165,7 +1174,7 @@ export default function App() {
                           onClick={(e) => e.stopPropagation()}
                         >
                           ?
-                          {showCircTooltip && (
+                          {showCircTooltip && circTooltipRef.current && (
                             <div style={{
                               position: 'absolute',
                               bottom: '100%',
@@ -1177,8 +1186,8 @@ export default function App() {
                               fontSize: '11px',
                               borderRadius: '6px',
                               whiteSpace: 'nowrap',
-                              zIndex: 1000,
-                              boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
+                              zIndex: 9999,
+                              boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
                               pointerEvents: 'none',
                               textAlign: 'left'
                             }}>
