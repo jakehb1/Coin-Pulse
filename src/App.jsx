@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 
-const COINGECKO_API = 'https://api.coingecko.com/api/v3';
+// Use Vercel serverless functions to proxy CoinGecko API (avoids CORS issues)
+const COINGECKO_API = typeof window !== 'undefined' ? '/api' : 'https://api.coingecko.com/api/v3';
 const DEXSCREENER_API = 'https://api.dexscreener.com';
 
 // Fallback data
@@ -343,11 +344,13 @@ export default function App() {
       const timestamp = Date.now();
       lastCoinsFetchRef.current = timestamp;
       
-      // Use unique timestamp and random to ensure no caching
+      // Use Vercel serverless function to proxy CoinGecko API (avoids CORS)
       const uniqueId = `${timestamp}-${Math.random().toString(36).substring(7)}`;
-      // Request supply data in markets API response
-      // Force fresh request by adding random query param and preventing 304 responses
-      const res = await fetch(`${COINGECKO_API}/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=100&page=1&sparkline=false&price_change_percentage=24h&_t=${uniqueId}&_r=${Math.random()}`, { 
+      const marketsUrl = typeof window !== 'undefined' 
+        ? `/api/coingecko-markets?vs_currency=usd&per_page=100&page=1&_t=${uniqueId}&_r=${Math.random()}`
+        : `${COINGECKO_API}/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=100&page=1&sparkline=false&price_change_percentage=24h&_t=${uniqueId}&_r=${Math.random()}`;
+      
+      const res = await fetch(marketsUrl, { 
         signal: AbortSignal.timeout(20000),
         cache: 'no-store',
         headers: {
@@ -410,11 +413,13 @@ export default function App() {
             const batchPromises = batch.map(async (id) => {
               try {
                 // Add unique timestamp to prevent caching
-                const detailTimestamp = Date.now();
-                const detailUniqueId = `${detailTimestamp}-${Math.random().toString(36).substring(7)}`;
-                  const detailRes = await fetch(
-                    `${COINGECKO_API}/coins/${id}?localization=false&tickers=false&market_data=true&community_data=false&developer_data=false&sparkline=false&_t=${detailUniqueId}&_r=${Math.random()}`,
-                    { 
+                  const detailTimestamp = Date.now();
+                  const detailUniqueId = `${detailTimestamp}-${Math.random().toString(36).substring(7)}`;
+                  const detailUrl = typeof window !== 'undefined'
+                    ? `/api/coingecko-detail?id=${id}&_t=${detailUniqueId}&_r=${Math.random()}`
+                    : `${COINGECKO_API}/coins/${id}?localization=false&tickers=false&market_data=true&community_data=false&developer_data=false&sparkline=false&_t=${detailUniqueId}&_r=${Math.random()}`;
+                  
+                  const detailRes = await fetch(detailUrl, {
                       signal: AbortSignal.timeout(10000), // Increased timeout
                       cache: 'no-store',
                       headers: {
