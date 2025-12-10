@@ -348,12 +348,6 @@ export default function App() {
       if (res.ok) {
         const coins = await res.json();
         if (coins?.length) {
-          // Calculate previous ranks for delta
-          const currentRanks = {};
-          coins.forEach((coin, index) => {
-            currentRanks[coin.id] = coin.market_cap_rank || (index + 1);
-          });
-          
           // Fetch supply data for top 50 coins
           const topCoinIds = coins.slice(0, 50).map(c => c.id);
           const supplyDataMap = new Map();
@@ -394,6 +388,9 @@ export default function App() {
             }
           }
           
+          // Store current ranks for delta calculation on next fetch
+          const currentRanks = {};
+          
           // Process coins with enhanced data
           const enhancedCoins = coins.map((coin, index) => {
             const supplyData = supplyDataMap.get(coin.id);
@@ -424,29 +421,35 @@ export default function App() {
             // Calculate Circ %: (circulating_supply / total_supply) * 100
             // Using real-time data from detail API
             let circPercent = null;
-            if (totalSupply && circulatingSupply && totalSupply > 0) {
+            if (totalSupply && circulatingSupply && totalSupply > 0 && circulatingSupply > 0) {
               // Use real-time circulating supply and total supply from detail API
               circPercent = (circulatingSupply / totalSupply) * 100;
-            } else if (marketCap && currentPrice && currentPrice > 0) {
+            } else if (marketCap && currentPrice && currentPrice > 0 && totalSupply && totalSupply > 0) {
               // Fallback: calculate circulating supply from market cap and price
               const calculatedCirculatingSupply = marketCap / currentPrice;
-              if (totalSupply && totalSupply > 0) {
+              if (calculatedCirculatingSupply > 0 && totalSupply > 0) {
                 circPercent = (calculatedCirculatingSupply / totalSupply) * 100;
               }
+            }
+            // If still null, try to get from markets API data
+            if (circPercent === null && coin.circulating_supply && coin.total_supply && coin.total_supply > 0) {
+              circPercent = (coin.circulating_supply / coin.total_supply) * 100;
             }
             
             // Calculate Delta: ranking change (previous_rank - current_rank)
             // Using real-time rank data from markets API
             // Positive delta = moved up in ranking, negative = moved down
-            const previousRank = previousRanksRef.current[coin.id];
             const currentRank = coin.market_cap_rank || (index + 1);
+            currentRanks[coin.id] = currentRank; // Store for next comparison
             
-            // Only show delta if we have a previous rank to compare with
-            // and the rank has actually changed
-            let delta = null;
-            if (previousRank && previousRank !== currentRank) {
+            const previousRank = previousRanksRef.current[coin.id];
+            
+            // Calculate delta - show 0 if no change, otherwise show the change
+            let delta = 0;
+            if (previousRank !== undefined && previousRank !== null && previousRank !== currentRank) {
               delta = previousRank - currentRank; // Positive = moved up, negative = moved down
             }
+            // If no previous rank, delta stays 0 (no change to show)
             
             // Check if stablecoin
             const isStablecoin = ['usdt', 'usdc', 'dai', 'busd', 'tusd', 'usdp', 'usdd', 'frax', 'lusd', 'susd', 'gusd', 'husd', 'ousd', 'usdn', 'usdk', 'usdx', 'usd', 'ust', 'mim'].includes(coin.id?.toLowerCase() || coin.symbol?.toLowerCase() || '');
@@ -472,6 +475,7 @@ export default function App() {
             };
           });
           
+          // Update previous ranks for next delta calculation
           previousRanksRef.current = currentRanks;
           setData(enhancedCoins);
           return;
@@ -678,6 +682,21 @@ export default function App() {
 
   return (
     <div style={{ minHeight: '100vh', backgroundColor: '#e5e5e5', padding: '20px 16px', fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif' }}>
+      <style>{`
+        @media (max-width: 768px) {
+          .mobile-hide {
+            display: none !important;
+          }
+          .mobile-stack {
+            flex-direction: column !important;
+            align-items: stretch !important;
+          }
+          .mobile-full-width {
+            width: 100% !important;
+            max-width: 100% !important;
+          }
+        }
+      `}</style>
       <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
         <div style={{ textAlign: 'center', marginBottom: '20px' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '8px' }}>
@@ -726,9 +745,9 @@ export default function App() {
           ))}
         </div>
 
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', gap: '12px', flexWrap: 'wrap' }}>
+        <div className="mobile-stack" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', gap: '12px', flexWrap: 'wrap' }}>
           {activeTab === 'all' && (
-            <div style={{ display: 'flex', gap: '24px', alignItems: 'center', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', gap: '24px', alignItems: 'center', flexWrap: 'wrap', width: '100%' }}>
               {/* Filter Noise Toggle */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                 <label style={{ 
@@ -819,7 +838,7 @@ export default function App() {
             </div>
           )}
           
-          <div style={{ position: 'relative', flex: '1', maxWidth: '400px', display: 'flex', marginLeft: 'auto' }}>
+          <div className="mobile-full-width" style={{ position: 'relative', flex: '1', maxWidth: '400px', display: 'flex', marginLeft: 'auto' }}>
             <input 
               type="text" 
               placeholder={activeTab === 'all' ? "Search (e.g. BTC, Pepe)..." : "Search..."} 
@@ -832,7 +851,8 @@ export default function App() {
                 fontSize: '14px', 
                 flex: '1', 
                 outline: 'none',
-                transition: 'border-color 0.2s'
+                transition: 'border-color 0.2s',
+                width: '100%'
               }}
               onFocus={(e) => e.target.style.borderColor = '#2563eb'}
               onBlur={(e) => e.target.style.borderColor = '#e5e5e5'}
@@ -843,7 +863,8 @@ export default function App() {
               top: '50%',
               transform: 'translateY(-50%)',
               fontSize: '16px',
-              color: '#9ca3af'
+              color: '#9ca3af',
+              pointerEvents: 'none'
             }}>🔍</span>
           </div>
           
@@ -910,8 +931,37 @@ export default function App() {
         {activeTab === 'all' && (
           <div style={{ backgroundColor: 'white', borderRadius: '12px', border: '1px solid #e5e5e5', overflow: 'hidden' }}>
             {loading && !currentData.length ? <div style={{ padding: '50px', textAlign: 'center', color: '#737373' }}>Loading...</div> : (
-              <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
+                <style>{`
+                  @media (max-width: 768px) {
+                    .table-responsive th:nth-child(2),
+                    .table-responsive td:nth-child(2) {
+                      display: none;
+                    }
+                    .table-responsive th,
+                    .table-responsive td {
+                      padding: 12px 8px;
+                      font-size: 12px;
+                    }
+                    .table-responsive th:first-child,
+                    .table-responsive td:first-child {
+                      padding-left: 12px;
+                    }
+                    .table-responsive th:last-child,
+                    .table-responsive td:last-child {
+                      padding-right: 12px;
+                    }
+                  }
+                  @media (max-width: 640px) {
+                    .table-responsive th:nth-child(7),
+                    .table-responsive td:nth-child(7),
+                    .table-responsive th:nth-child(8),
+                    .table-responsive td:nth-child(8) {
+                      display: none;
+                    }
+                  }
+                `}</style>
+                <table className="table-responsive" style={{ width: '100%', borderCollapse: 'collapse', minWidth: '700px' }}>
                   <thead>
                     <tr style={{ backgroundColor: '#fafafa', borderBottom: '1px solid #e5e5e5' }}>
                       <th 
@@ -1058,9 +1108,9 @@ export default function App() {
                   <tbody>
                     {filteredData.map((coin, index) => {
                       const isPositive = coin.priceChange24h >= 0;
-                      const deltaValue = coin.delta !== null && coin.delta !== 0 ? coin.delta : null;
-                      const circPercent = coin.circPercent || 0;
-                      const circColor = circPercent >= 90 ? '#22c55e' : circPercent >= 70 ? '#f59e0b' : '#f97316';
+                      const deltaValue = coin.delta !== null && coin.delta !== undefined ? coin.delta : 0;
+                      const circPercent = coin.circPercent !== null && coin.circPercent !== undefined ? coin.circPercent : null;
+                      const circColor = circPercent !== null && circPercent >= 90 ? '#22c55e' : circPercent !== null && circPercent >= 70 ? '#f59e0b' : '#f97316';
                       
                       return (
                         <tr 
@@ -1156,7 +1206,7 @@ export default function App() {
                             )}
                           </td>
                           <td style={{ padding: '16px', textAlign: 'center' }}>
-                            {deltaValue !== null ? (
+                            {deltaValue !== 0 ? (
                               <span style={{
                                 display: 'inline-block',
                                 padding: '4px 8px',
@@ -1169,7 +1219,7 @@ export default function App() {
                                 {deltaValue > 0 ? '+' : ''}{deltaValue}
                               </span>
                             ) : (
-                              <span style={{ color: '#d1d5db' }}>-</span>
+                              <span style={{ color: '#d1d5db', fontSize: '12px' }}>-</span>
                             )}
                           </td>
                           <td style={{ padding: '16px', textAlign: 'right' }}>
@@ -1186,9 +1236,9 @@ export default function App() {
                                 minWidth: '45px',
                                 textAlign: 'right'
                               }}>
-                                {circPercent !== null && circPercent !== undefined && !isNaN(circPercent) ? `${circPercent.toFixed(1)}%` : '-'}
+                                {circPercent !== null && circPercent !== undefined && !isNaN(circPercent) && circPercent >= 0 ? `${circPercent.toFixed(1)}%` : '-'}
                               </span>
-                              {circPercent > 0 && (
+                              {circPercent !== null && circPercent !== undefined && !isNaN(circPercent) && circPercent > 0 && (
                                 <div style={{
                                   width: '60px',
                                   height: '6px',
@@ -1197,7 +1247,7 @@ export default function App() {
                                   overflow: 'hidden'
                                 }}>
                                   <div style={{
-                                    width: `${Math.min(100, circPercent)}%`,
+                                    width: `${Math.min(100, Math.max(0, circPercent))}%`,
                                     height: '100%',
                                     backgroundColor: circColor,
                                     transition: 'width 0.3s'
