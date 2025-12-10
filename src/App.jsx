@@ -327,7 +327,7 @@ export default function App() {
       (entries) => {
         if (entries[0].isIntersecting && hasMore && !loadingMore && !memeLoadingMore) {
           if (activeTab === 'trends') {
-            loadMoreTrends();
+          loadMoreTrends();
           } else if (activeTab === 'memes') {
             loadMoreMemes();
           }
@@ -703,8 +703,8 @@ export default function App() {
             'Pragma': 'no-cache'
           }
         });
-        if (res.ok) {
-          const boosts = await res.json();
+      if (res.ok) {
+        const boosts = await res.json();
           if (boosts?.length > 0) {
             // Fetch details for top 20 tokens first (faster initial load)
             const initialBatch = pageNum === 1 ? boosts.slice(0, 20) : boosts.slice((pageNum - 1) * 20, pageNum * 20);
@@ -776,59 +776,69 @@ export default function App() {
       
       // Fetch pump.fun in background (non-blocking, only on first page)
       if (pageNum === 1 && !append) {
-        fetch(`/api/pumpfun?limit=30&offset=0`).then(async res => {
-          if (res.ok) {
-            try {
-              const data = await res.json();
-              const coins = Array.isArray(data.coins) ? data.coins : Array.isArray(data) ? data : [];
-              const pumpCoins = coins.map(coin => ({
-                id: coin.id || coin.mint || coin.address,
-                symbol: coin.symbol || 'UNKNOWN',
-                name: coin.name || coin.symbol || 'Unknown',
-                price: coin.price || 0,
-                priceChange24h: coin.priceChange24h || 0,
-                marketCap: coin.marketCap || 0,
-                volume24h: coin.volume24h || 0,
-                chain: coin.chain || 'solana',
-                image: coin.image || null,
-                source: 'pumpfun'
-              })).filter(c => c.id);
-              
-              if (pumpCoins.length > 0) {
-                const processedPump = pumpCoins.map(p => generateFlowData(p, true));
+        // Use setTimeout to ensure this doesn't block rendering
+        setTimeout(() => {
+          fetch(`/api/pumpfun?limit=30&offset=0`).then(async res => {
+            if (res.ok) {
+              try {
+                const data = await res.json();
+                const coins = Array.isArray(data.coins) ? data.coins : Array.isArray(data) ? data : [];
+                const pumpCoins = coins.map(coin => ({
+                  id: coin.id || coin.mint || coin.address,
+                  symbol: coin.symbol || 'UNKNOWN',
+                  name: coin.name || coin.symbol || 'Unknown',
+                  price: coin.price || 0,
+                  priceChange24h: coin.priceChange24h || 0,
+                  marketCap: coin.marketCap || 0,
+                  volume24h: coin.volume24h || 0,
+                  chain: coin.chain || 'solana',
+                  image: coin.image || null,
+                  source: 'pumpfun'
+                })).filter(c => c.id);
                 
-                // Merge with existing data
-                setAllMemesCache(prev => {
-                  const combined = [...prev, ...processedPump];
-                  const unique = new Map();
-                  combined.forEach(coin => {
-                    const key = coin.id?.toLowerCase();
-                    if (key && !unique.has(key)) unique.set(key, coin);
+                if (pumpCoins.length > 0) {
+                  const processedPump = pumpCoins.map(p => generateFlowData(p, true));
+                  
+                  // Merge with existing data
+                  setAllMemesCache(prev => {
+                    const combined = [...prev, ...processedPump];
+                    const unique = new Map();
+                    combined.forEach(coin => {
+                      const key = coin.id?.toLowerCase();
+                      if (key && !unique.has(key)) unique.set(key, coin);
+                    });
+                    const merged = Array.from(unique.values());
+                    merged.sort((a, b) => (b.signalScore || 0) - (a.signalScore || 0));
+                    return merged;
                   });
-                  const merged = Array.from(unique.values());
-                  merged.sort((a, b) => (b.signalScore || 0) - (a.signalScore || 0));
-                  return merged;
-                });
-                
-                setMemeData(prev => {
-                  const combined = [...prev, ...processedPump];
-                  const unique = new Map();
-                  combined.forEach(coin => {
-                    const key = coin.id?.toLowerCase();
-                    if (key && !unique.has(key)) unique.set(key, coin);
+                  
+                  setMemeData(prev => {
+                    const combined = [...prev, ...processedPump];
+                    const unique = new Map();
+                    combined.forEach(coin => {
+                      const key = coin.id?.toLowerCase();
+                      if (key && !unique.has(key)) unique.set(key, coin);
+                    });
+                    const merged = Array.from(unique.values());
+                    merged.sort((a, b) => (b.signalScore || 0) - (a.signalScore || 0));
+                    return merged;
                   });
-                  const merged = Array.from(unique.values());
-                  merged.sort((a, b) => (b.signalScore || 0) - (a.signalScore || 0));
-                  return merged;
-                });
+                }
+              } catch (err) {
+                console.warn('[DEBUG] Pump.fun processing error:', err);
               }
-            } catch (err) {
-              console.warn('[DEBUG] Pump.fun processing error:', err);
             }
-          }
-        }).catch(err => {
-          console.warn('[DEBUG] Pump.fun API error:', err);
-        });
+          }).catch(err => {
+            console.warn('[DEBUG] Pump.fun API error:', err);
+          });
+        }, 100);
+      }
+      
+      // If no data was loaded and it's first load, show fallback
+      if (!append && dexCoins.length === 0) {
+        const fallback = FALLBACK_MEMES.map(c => generateFlowData(c, true));
+        setMemeData(fallback);
+        setAllMemesCache(fallback);
       }
       
       // Set hasMore based on DexScreener results
@@ -838,12 +848,13 @@ export default function App() {
     } catch (err) {
       console.error('[DEBUG] Memes fetch error:', err);
       if (!append) {
-        setMemeData(FALLBACK_MEMES.map(c => generateFlowData(c, true)));
+    setMemeData(FALLBACK_MEMES.map(c => generateFlowData(c, true)));
+        setAllMemesCache(FALLBACK_MEMES.map(c => generateFlowData(c, true)));
       }
     } finally {
       setMemeLoadingMore(false);
     }
-  }, [memePageSize]);
+  }, []);
 
   useEffect(() => {
     setLoading(true);
@@ -1009,10 +1020,10 @@ export default function App() {
   // Handle refresh button
   const handleRefresh = () => {
     if (activeTab === 'trends') {
-      setPage(1);
-      setHasMore(true);
-      setTrends([]);
-      fetchTrends(1, false);
+    setPage(1);
+    setHasMore(true);
+    setTrends([]);
+    fetchTrends(1, false);
     } else if (activeTab === 'memes') {
       setMemePage(1);
       setHasMore(true);
@@ -1766,10 +1777,10 @@ export default function App() {
                       {!hasMore && filteredData.length > 0 && (
                         <div style={{ color: '#a3a3a3', fontSize: '13px', padding: '20px' }}>
                           ✓ All {allMemesCache.length} meme coins loaded
-                        </div>
+                </div>
                       )}
-                    </div>
-                  )}
+              </div>
+            )}
                 </div>
               </div>
             )}
