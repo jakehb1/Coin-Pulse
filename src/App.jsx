@@ -346,25 +346,54 @@ export default function App() {
       // Use unique timestamp and random to ensure no caching
       const uniqueId = `${timestamp}-${Math.random().toString(36).substring(7)}`;
       // Request supply data in markets API response
-      const res = await fetch(`${COINGECKO_API}/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=100&page=1&sparkline=false&price_change_percentage=24h&_t=${uniqueId}`, { 
+      // Force fresh request by adding random query param and preventing 304 responses
+      const res = await fetch(`${COINGECKO_API}/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=100&page=1&sparkline=false&price_change_percentage=24h&_t=${uniqueId}&_r=${Math.random()}`, { 
         signal: AbortSignal.timeout(20000),
         cache: 'no-store',
         headers: {
           'Cache-Control': 'no-cache, no-store, must-revalidate, max-age=0',
           'Pragma': 'no-cache',
           'Expires': '0',
-          'If-None-Match': '*'
+          'If-None-Match': '*',
+          'If-Modified-Since': '0' // Prevent 304 responses
         }
       });
-      if (res.ok) {
-        const coins = await res.json();
+      console.log('[DEBUG] Markets API response status:', res.status, res.statusText);
+      
+      let coins = null;
+      
+      // If we get 304, force a fresh request
+      if (res.status === 304) {
+        console.warn('[DEBUG] Got 304 - forcing fresh request');
+        const forceTimestamp = Date.now();
+        const forceRes = await fetch(`${COINGECKO_API}/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=100&page=1&sparkline=false&price_change_percentage=24h&_t=${forceTimestamp}&_r=${Math.random()}&_force=${forceTimestamp}`, { 
+          signal: AbortSignal.timeout(20000),
+          cache: 'reload',
+          headers: {
+            'Cache-Control': 'no-cache, no-store, must-revalidate, max-age=0',
+            'Pragma': 'no-cache',
+            'Expires': '0'
+          }
+        });
+        if (forceRes.ok) {
+          coins = await forceRes.json();
+          console.log('[DEBUG] Force reload successful, got', coins?.length, 'coins');
+        } else {
+          console.error('[DEBUG] Force reload failed:', forceRes.status);
+          return;
+        }
+      } else if (res.ok) {
+        coins = await res.json();
         console.log('[DEBUG] Markets API response sample:', coins[0] ? {
           id: coins[0].id,
+          name: coins[0].name,
           current_price: coins[0].current_price,
           circulating_supply: coins[0].circulating_supply,
           total_supply: coins[0].total_supply,
-          market_cap: coins[0].market_cap
+          market_cap: coins[0].market_cap,
+          market_cap_rank: coins[0].market_cap_rank
         } : 'No coins');
+        console.log('[DEBUG] Total coins received:', coins?.length);
         if (coins?.length) {
           // Fetch supply data for top 100 coins to ensure circ % is calculated
           // Use detail API for more accurate supply data
@@ -383,19 +412,20 @@ export default function App() {
                 // Add unique timestamp to prevent caching
                 const detailTimestamp = Date.now();
                 const detailUniqueId = `${detailTimestamp}-${Math.random().toString(36).substring(7)}`;
-                const detailRes = await fetch(
-                  `${COINGECKO_API}/coins/${id}?localization=false&tickers=false&market_data=true&community_data=false&developer_data=false&sparkline=false&_t=${detailUniqueId}`,
-                  { 
-                    signal: AbortSignal.timeout(10000), // Increased timeout
-                    cache: 'no-store',
-                    headers: {
-                      'Cache-Control': 'no-cache, no-store, must-revalidate, max-age=0',
-                      'Pragma': 'no-cache',
-                      'Expires': '0',
-                      'If-None-Match': '*'
+                  const detailRes = await fetch(
+                    `${COINGECKO_API}/coins/${id}?localization=false&tickers=false&market_data=true&community_data=false&developer_data=false&sparkline=false&_t=${detailUniqueId}&_r=${Math.random()}`,
+                    { 
+                      signal: AbortSignal.timeout(10000), // Increased timeout
+                      cache: 'no-store',
+                      headers: {
+                        'Cache-Control': 'no-cache, no-store, must-revalidate, max-age=0',
+                        'Pragma': 'no-cache',
+                        'Expires': '0',
+                        'If-None-Match': '*',
+                        'If-Modified-Since': '0' // Prevent 304 responses
+                      }
                     }
-                  }
-                );
+                  );
                 if (detailRes.ok) {
                   const detailData = await detailRes.json();
                   const supplyData = {
@@ -583,19 +613,20 @@ export default function App() {
             const baseData = generateFlowData(updatedCoin, false);
             
             // Debug logging for first few coins
-            if (index < 3) {
-              console.log(`[DEBUG] Coin ${coin.id}:`, {
+            if (index < 5) {
+              console.log(`[DEBUG] Coin ${index + 1} - ${coin.id}:`, {
                 marketsPrice,
                 detailPrice,
                 currentPrice,
-                circulatingSupply,
-                totalSupply,
+                circulatingSupply: supplyData?.circulatingSupply,
+                totalSupply: supplyData?.totalSupply,
                 coinCirculatingSupply: coin.circulating_supply,
                 coinTotalSupply: coin.total_supply,
                 circPercent,
                 previousRank,
                 currentRank,
-                delta
+                delta,
+                hasSupplyData: !!supplyData
               });
             }
             
