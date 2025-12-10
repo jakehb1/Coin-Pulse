@@ -681,172 +681,47 @@ export default function App() {
     setData(FALLBACK_COINS.map(c => generateFlowData(c, false)));
   }, []);
 
-  const fetchMemes = useCallback(async (pageNum = 1, append = false) => {
+  const fetchMemes = useCallback(async () => {
     try {
-      setMemeLoadingMore(true);
-      
-      // Fast path: Fetch DexScreener first and show immediately, then add pump.fun in background
-      const fetchDexScreener = async () => {
-        const timestamp = Date.now();
-        const res = await fetch(`${DEXSCREENER_API}/token-boosts/top/v1?_t=${timestamp}`, { 
-          signal: AbortSignal.timeout(8000),
-          cache: 'no-cache',
-          headers: {
-            'Cache-Control': 'no-cache, no-store, must-revalidate',
-            'Pragma': 'no-cache'
-          }
-        });
+      // Add timestamp to prevent caching and ensure live data
+      const timestamp = Date.now();
+      const res = await fetch(`${DEXSCREENER_API}/token-boosts/top/v1?_t=${timestamp}`, { 
+        signal: AbortSignal.timeout(10000),
+        cache: 'no-cache',
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache'
+        }
+      });
       if (res.ok) {
         const boosts = await res.json();
-          if (boosts?.length > 0) {
-            // Fetch details for top 20 tokens first (faster initial load)
-            const initialBatch = pageNum === 1 ? boosts.slice(0, 20) : boosts.slice((pageNum - 1) * 20, pageNum * 20);
-            const pairs = await Promise.all(
-              initialBatch.map(async t => {
-                try { 
-                  const tokenTimestamp = Date.now();
-                  const r = await fetch(`${DEXSCREENER_API}/latest/dex/tokens/${t.tokenAddress}?_t=${tokenTimestamp}`, {
-                    cache: 'no-cache',
-                    signal: AbortSignal.timeout(5000),
-                    headers: {
-                      'Cache-Control': 'no-cache, no-store, must-revalidate'
-                    }
-                  }); 
-                  const d = await r.json(); 
-                  return d.pairs?.[0] ? { 
-                    id: d.pairs[0].baseToken?.address, 
-                    symbol: d.pairs[0].baseToken?.symbol, 
-                    name: d.pairs[0].baseToken?.name, 
-                    price: parseFloat(d.pairs[0].priceUsd || 0), 
-                    priceChange24h: parseFloat(d.pairs[0].priceChange?.h24 || 0), 
-                    marketCap: parseFloat(d.pairs[0].fdv || 0), 
-                    volume24h: parseFloat(d.pairs[0].volume?.h24 || 0), 
-                    chain: d.pairs[0].chainId,
-                    source: 'dexscreener'
-                  } : null; 
-                } catch { return null; }
-              })
-            );
-            return pairs.filter(Boolean);
+        if (boosts?.length > 3) {
+          const pairs = await Promise.all(boosts.slice(0, 15).map(async t => {
+            try { 
+              const tokenTimestamp = Date.now();
+              const r = await fetch(`${DEXSCREENER_API}/latest/dex/tokens/${t.tokenAddress}?_t=${tokenTimestamp}`, {
+                cache: 'no-cache',
+                headers: {
+                  'Cache-Control': 'no-cache, no-store, must-revalidate'
+                }
+              }); 
+              const d = await r.json(); 
+              return d.pairs?.[0] ? { id: d.pairs[0].baseToken?.address, symbol: d.pairs[0].baseToken?.symbol, name: d.pairs[0].baseToken?.name, price: parseFloat(d.pairs[0].priceUsd || 0), priceChange24h: parseFloat(d.pairs[0].priceChange?.h24 || 0), marketCap: parseFloat(d.pairs[0].fdv || 0), volume24h: parseFloat(d.pairs[0].volume?.h24 || 0), chain: d.pairs[0].chainId } : null; 
+            } catch { return null; }
+          }));
+          const valid = pairs.filter(Boolean);
+          if (valid.length > 3) { 
+            const processed = valid.map(p => generateFlowData(p, true));
+            setMemeData(processed);
+            setAllMemesCache(processed);
+            return; 
           }
         }
-        return [];
-      };
-      
-      // Fetch DexScreener first (faster, more reliable)
-      const dexCoins = await fetchDexScreener();
-      
-      // Process and show DexScreener data immediately
-      if (dexCoins.length > 0) {
-        const processedDex = dexCoins.map(p => generateFlowData(p, true));
-        processedDex.sort((a, b) => (b.signalScore || 0) - (a.signalScore || 0));
-        
-        if (append) {
-          setAllMemesCache(prev => {
-            const combined = [...prev, ...processedDex];
-            const unique = new Map();
-            combined.forEach(coin => {
-              const key = coin.id?.toLowerCase();
-              if (key && !unique.has(key)) unique.set(key, coin);
-            });
-            return Array.from(unique.values());
-          });
-          setMemeData(prev => {
-            const combined = [...prev, ...processedDex];
-            const unique = new Map();
-            combined.forEach(coin => {
-              const key = coin.id?.toLowerCase();
-              if (key && !unique.has(key)) unique.set(key, coin);
-            });
-            return Array.from(unique.values());
-          });
-        } else {
-          // First load - show DexScreener immediately
-          setAllMemesCache(processedDex);
-          setMemeData(processedDex);
-        }
       }
-      
-      // Fetch pump.fun in background (non-blocking, only on first page)
-      if (pageNum === 1 && !append) {
-        // Use setTimeout to ensure this doesn't block rendering
-        setTimeout(() => {
-          fetch(`/api/pumpfun?limit=30&offset=0`).then(async res => {
-            if (res.ok) {
-              try {
-                const data = await res.json();
-                const coins = Array.isArray(data.coins) ? data.coins : Array.isArray(data) ? data : [];
-                const pumpCoins = coins.map(coin => ({
-                  id: coin.id || coin.mint || coin.address,
-                  symbol: coin.symbol || 'UNKNOWN',
-                  name: coin.name || coin.symbol || 'Unknown',
-                  price: coin.price || 0,
-                  priceChange24h: coin.priceChange24h || 0,
-                  marketCap: coin.marketCap || 0,
-                  volume24h: coin.volume24h || 0,
-                  chain: coin.chain || 'solana',
-                  image: coin.image || null,
-                  source: 'pumpfun'
-                })).filter(c => c.id);
-                
-                if (pumpCoins.length > 0) {
-                  const processedPump = pumpCoins.map(p => generateFlowData(p, true));
-                  
-                  // Merge with existing data
-                  setAllMemesCache(prev => {
-                    const combined = [...prev, ...processedPump];
-                    const unique = new Map();
-                    combined.forEach(coin => {
-                      const key = coin.id?.toLowerCase();
-                      if (key && !unique.has(key)) unique.set(key, coin);
-                    });
-                    const merged = Array.from(unique.values());
-                    merged.sort((a, b) => (b.signalScore || 0) - (a.signalScore || 0));
-                    return merged;
-                  });
-                  
-                  setMemeData(prev => {
-                    const combined = [...prev, ...processedPump];
-                    const unique = new Map();
-                    combined.forEach(coin => {
-                      const key = coin.id?.toLowerCase();
-                      if (key && !unique.has(key)) unique.set(key, coin);
-                    });
-                    const merged = Array.from(unique.values());
-                    merged.sort((a, b) => (b.signalScore || 0) - (a.signalScore || 0));
-                    return merged;
-                  });
-                }
-              } catch (err) {
-                console.warn('[DEBUG] Pump.fun processing error:', err);
-              }
-            }
-          }).catch(err => {
-            console.warn('[DEBUG] Pump.fun API error:', err);
-          });
-        }, 100);
-      }
-      
-      // If no data was loaded and it's first load, show fallback
-      if (!append && dexCoins.length === 0) {
-        const fallback = FALLBACK_MEMES.map(c => generateFlowData(c, true));
-        setMemeData(fallback);
-        setAllMemesCache(fallback);
-      }
-      
-      // Set hasMore based on DexScreener results
-      setHasMore(dexCoins.length >= 20);
-      
-      console.log(`[DEBUG] Fetched ${dexCoins.length} meme coins from DexScreener`);
-    } catch (err) {
-      console.error('[DEBUG] Memes fetch error:', err);
-      if (!append) {
-    setMemeData(FALLBACK_MEMES.map(c => generateFlowData(c, true)));
-        setAllMemesCache(FALLBACK_MEMES.map(c => generateFlowData(c, true)));
-      }
-    } finally {
-      setMemeLoadingMore(false);
-    }
+    } catch {}
+    const fallback = FALLBACK_MEMES.map(c => generateFlowData(c, true));
+    setMemeData(fallback);
+    setAllMemesCache(fallback);
   }, []);
 
   useEffect(() => {
