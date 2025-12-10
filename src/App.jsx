@@ -227,6 +227,11 @@ export default function App() {
   const [totalCount, setTotalCount] = useState(0);
   const observerRef = useRef(null);
   const loadMoreRef = useRef(null);
+  
+  // Memes pagination and caching
+  const [memePage, setMemePage] = useState(1);
+  const [allMemesCache, setAllMemesCache] = useState([]); // Cache all fetched memes for search
+  const [memeLoadingMore, setMemeLoadingMore] = useState(false);
 
   // Fetch trends with pagination
   const fetchTrends = useCallback(async (pageNum = 1, append = false) => {
