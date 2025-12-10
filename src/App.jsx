@@ -190,7 +190,7 @@ const LoadingSpinner = () => (
 );
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState('trends');
+  const [activeTab, setActiveTab] = useState('all');
   const [data, setData] = useState([]);
   const [memeData, setMemeData] = useState([]);
   const [trends, setTrends] = useState([]);
@@ -207,6 +207,10 @@ export default function App() {
   const [filterNoise, setFilterNoise] = useState(true);
   const [showStablecoins, setShowStablecoins] = useState(false);
   const previousRanksRef = useRef({});
+  
+  // Sorting state
+  const [sortColumn, setSortColumn] = useState('rank');
+  const [sortDirection, setSortDirection] = useState('asc');
   
   // Infinite scroll state
   const [page, setPage] = useState(1);
@@ -481,8 +485,75 @@ export default function App() {
       }
     }
     
-    return d.sort((a, b) => b.signalScore - a.signalScore);
-  }, [currentData, searchQuery, activeTab, filterNoise, showStablecoins]);
+    // Apply sorting
+    if (activeTab === 'all') {
+      d.sort((a, b) => {
+        let aVal, bVal;
+        switch (sortColumn) {
+          case 'rank':
+            aVal = a.rank || 9999;
+            bVal = b.rank || 9999;
+            break;
+          case 'name':
+            aVal = (a.name || '').toLowerCase();
+            bVal = (b.name || '').toLowerCase();
+            break;
+          case 'price':
+            aVal = a.price || 0;
+            bVal = b.price || 0;
+            break;
+          case 'priceChange24h':
+            aVal = a.priceChange24h || 0;
+            bVal = b.priceChange24h || 0;
+            break;
+          case 'fdv':
+            aVal = a.fdv || a.marketCap || 0;
+            bVal = b.fdv || b.marketCap || 0;
+            break;
+          case 'delta':
+            aVal = a.delta !== null ? a.delta : -9999;
+            bVal = b.delta !== null ? b.delta : -9999;
+            break;
+          case 'circPercent':
+            aVal = a.circPercent !== null ? a.circPercent : -1;
+            bVal = b.circPercent !== null ? b.circPercent : -1;
+            break;
+          default:
+            return 0;
+        }
+        
+        if (typeof aVal === 'string') {
+          return sortDirection === 'asc' 
+            ? aVal.localeCompare(bVal)
+            : bVal.localeCompare(aVal);
+        }
+        
+        return sortDirection === 'asc' 
+          ? aVal - bVal
+          : bVal - aVal;
+      });
+    } else {
+      // Default sort for memes
+      d.sort((a, b) => b.signalScore - a.signalScore);
+    }
+    
+    return d;
+  }, [currentData, searchQuery, activeTab, filterNoise, showStablecoins, sortColumn, sortDirection]);
+  
+  // Handle column sorting
+  const handleSort = (column) => {
+    if (sortColumn === column) {
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortColumn(column);
+      setSortDirection('asc');
+    }
+  };
+  
+  const getSortIcon = (column) => {
+    if (sortColumn !== column) return '↕';
+    return sortDirection === 'asc' ? '↑' : '↓';
+  };
   
   // Count hidden coins
   const hiddenByNoise = useMemo(() => {
@@ -507,9 +578,19 @@ export default function App() {
     <div style={{ minHeight: '100vh', backgroundColor: '#e5e5e5', padding: '20px 16px', fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif' }}>
       <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
         <div style={{ textAlign: 'center', marginBottom: '20px' }}>
-          <h1 style={{ fontSize: '32px', fontWeight: '700', color: '#171717', margin: '0 0 6px', letterSpacing: '-0.02em' }}>
-            {activeTab === 'trends' ? '🔥 Trends' : activeTab === 'memes' ? '🐸 Memes' : 'pulse.ai'}
-          </h1>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px', marginBottom: '8px' }}>
+            <img 
+              src="/pulse.svg" 
+              alt="Pulse" 
+              style={{ height: '40px', width: 'auto' }}
+              onError={(e) => {
+                e.target.style.display = 'none';
+              }}
+            />
+            <h1 style={{ fontSize: '32px', fontWeight: '700', color: '#171717', margin: 0, letterSpacing: '-0.02em' }}>
+              {activeTab === 'trends' ? '🔥 Trends' : activeTab === 'memes' ? '🐸 Memes' : 'pulse.ai'}
+            </h1>
+          </div>
           <p style={{ fontSize: '12px', color: '#737373', margin: '0 0 10px' }}>
             {activeTab === 'trends' ? 'Real-time cross-platform trend detection' : activeTab === 'memes' ? 'Live from DexScreener' : 'Live prices'}
           </p>
@@ -731,18 +812,143 @@ export default function App() {
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
                     <tr style={{ backgroundColor: '#fafafa', borderBottom: '1px solid #e5e5e5' }}>
-                      <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: '11px', fontWeight: '600', color: '#737373', textTransform: 'uppercase', letterSpacing: '0.05em', width: '60px' }}>#</th>
+                      <th 
+                        onClick={() => handleSort('rank')}
+                        style={{ 
+                          padding: '12px 16px', 
+                          textAlign: 'left', 
+                          fontSize: '11px', 
+                          fontWeight: '600', 
+                          color: '#737373', 
+                          textTransform: 'uppercase', 
+                          letterSpacing: '0.05em', 
+                          width: '60px',
+                          cursor: 'pointer',
+                          userSelect: 'none',
+                          transition: 'background-color 0.2s'
+                        }}
+                        onMouseEnter={(e) => e.target.style.backgroundColor = '#f0f0f0'}
+                        onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}
+                      >
+                        # {getSortIcon('rank')}
+                      </th>
                       <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: '11px', fontWeight: '600', color: '#737373', textTransform: 'uppercase', letterSpacing: '0.05em' }}>^</th>
-                      <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: '11px', fontWeight: '600', color: '#737373', textTransform: 'uppercase', letterSpacing: '0.05em' }}>ASSET</th>
-                      <th style={{ padding: '12px 16px', textAlign: 'right', fontSize: '11px', fontWeight: '600', color: '#737373', textTransform: 'uppercase', letterSpacing: '0.05em' }}>PRICE</th>
-                      <th style={{ padding: '12px 16px', textAlign: 'right', fontSize: '11px', fontWeight: '600', color: '#737373', textTransform: 'uppercase', letterSpacing: '0.05em' }}>24H %</th>
-                      <th style={{ padding: '12px 16px', textAlign: 'right', fontSize: '11px', fontWeight: '600', color: '#737373', textTransform: 'uppercase', letterSpacing: '0.05em' }}>FDV</th>
-                      <th style={{ padding: '12px 16px', textAlign: 'center', fontSize: '11px', fontWeight: '600', color: '#737373', textTransform: 'uppercase', letterSpacing: '0.05em', position: 'relative' }}>
-                        DELTA
+                      <th 
+                        onClick={() => handleSort('name')}
+                        style={{ 
+                          padding: '12px 16px', 
+                          textAlign: 'left', 
+                          fontSize: '11px', 
+                          fontWeight: '600', 
+                          color: '#737373', 
+                          textTransform: 'uppercase', 
+                          letterSpacing: '0.05em',
+                          cursor: 'pointer',
+                          userSelect: 'none',
+                          transition: 'background-color 0.2s'
+                        }}
+                        onMouseEnter={(e) => e.target.style.backgroundColor = '#f0f0f0'}
+                        onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}
+                      >
+                        ASSET {getSortIcon('name')}
+                      </th>
+                      <th 
+                        onClick={() => handleSort('price')}
+                        style={{ 
+                          padding: '12px 16px', 
+                          textAlign: 'right', 
+                          fontSize: '11px', 
+                          fontWeight: '600', 
+                          color: '#737373', 
+                          textTransform: 'uppercase', 
+                          letterSpacing: '0.05em',
+                          cursor: 'pointer',
+                          userSelect: 'none',
+                          transition: 'background-color 0.2s'
+                        }}
+                        onMouseEnter={(e) => e.target.style.backgroundColor = '#f0f0f0'}
+                        onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}
+                      >
+                        PRICE {getSortIcon('price')}
+                      </th>
+                      <th 
+                        onClick={() => handleSort('priceChange24h')}
+                        style={{ 
+                          padding: '12px 16px', 
+                          textAlign: 'right', 
+                          fontSize: '11px', 
+                          fontWeight: '600', 
+                          color: '#737373', 
+                          textTransform: 'uppercase', 
+                          letterSpacing: '0.05em',
+                          cursor: 'pointer',
+                          userSelect: 'none',
+                          transition: 'background-color 0.2s'
+                        }}
+                        onMouseEnter={(e) => e.target.style.backgroundColor = '#f0f0f0'}
+                        onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}
+                      >
+                        24H % {getSortIcon('priceChange24h')}
+                      </th>
+                      <th 
+                        onClick={() => handleSort('fdv')}
+                        style={{ 
+                          padding: '12px 16px', 
+                          textAlign: 'right', 
+                          fontSize: '11px', 
+                          fontWeight: '600', 
+                          color: '#737373', 
+                          textTransform: 'uppercase', 
+                          letterSpacing: '0.05em',
+                          cursor: 'pointer',
+                          userSelect: 'none',
+                          transition: 'background-color 0.2s'
+                        }}
+                        onMouseEnter={(e) => e.target.style.backgroundColor = '#f0f0f0'}
+                        onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}
+                      >
+                        FDV {getSortIcon('fdv')}
+                      </th>
+                      <th 
+                        onClick={() => handleSort('delta')}
+                        style={{ 
+                          padding: '12px 16px', 
+                          textAlign: 'center', 
+                          fontSize: '11px', 
+                          fontWeight: '600', 
+                          color: '#737373', 
+                          textTransform: 'uppercase', 
+                          letterSpacing: '0.05em', 
+                          position: 'relative',
+                          cursor: 'pointer',
+                          userSelect: 'none',
+                          transition: 'background-color 0.2s'
+                        }}
+                        onMouseEnter={(e) => e.target.style.backgroundColor = '#f0f0f0'}
+                        onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}
+                      >
+                        DELTA {getSortIcon('delta')}
                         <span style={{ display: 'inline-block', marginLeft: '4px', cursor: 'help', fontSize: '12px' }}>?</span>
                       </th>
-                      <th style={{ padding: '12px 16px', textAlign: 'right', fontSize: '11px', fontWeight: '600', color: '#737373', textTransform: 'uppercase', letterSpacing: '0.05em', position: 'relative' }}>
-                        CIRC %
+                      <th 
+                        onClick={() => handleSort('circPercent')}
+                        style={{ 
+                          padding: '12px 16px', 
+                          textAlign: 'right', 
+                          fontSize: '11px', 
+                          fontWeight: '600', 
+                          color: '#737373', 
+                          textTransform: 'uppercase', 
+                          letterSpacing: '0.05em', 
+                          position: 'relative',
+                          cursor: 'pointer',
+                          userSelect: 'none',
+                          transition: 'background-color 0.2s'
+                        }}
+                        onMouseEnter={(e) => e.target.style.backgroundColor = '#f0f0f0'}
+                        onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}
+                      >
+                        CIRC % {getSortIcon('circPercent')}
                         <span style={{ display: 'inline-block', marginLeft: '4px', cursor: 'help', fontSize: '12px' }}>?</span>
                       </th>
                     </tr>
