@@ -213,6 +213,10 @@ export default function App() {
   const [sortColumn, setSortColumn] = useState('rank');
   const [sortDirection, setSortDirection] = useState('asc');
   
+  // Tooltip state
+  const [showDeltaTooltip, setShowDeltaTooltip] = useState(false);
+  const [showCircTooltip, setShowCircTooltip] = useState(false);
+  
   // Infinite scroll state
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
@@ -1080,7 +1084,53 @@ export default function App() {
                         onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}
                       >
                         DELTA {getSortIcon('delta')}
-                        <span style={{ display: 'inline-block', marginLeft: '4px', cursor: 'help', fontSize: '12px' }}>?</span>
+                        <span 
+                          style={{ 
+                            display: 'inline-block', 
+                            marginLeft: '4px', 
+                            cursor: 'help', 
+                            fontSize: '12px',
+                            color: '#9ca3af',
+                            position: 'relative'
+                          }}
+                          onMouseEnter={() => setShowDeltaTooltip(true)}
+                          onMouseLeave={() => setShowDeltaTooltip(false)}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          ?
+                          {showDeltaTooltip && (
+                            <div style={{
+                              position: 'absolute',
+                              bottom: '100%',
+                              left: '50%',
+                              transform: 'translateX(-50%)',
+                              marginBottom: '8px',
+                              padding: '8px 12px',
+                              backgroundColor: '#171717',
+                              color: 'white',
+                              fontSize: '11px',
+                              borderRadius: '6px',
+                              whiteSpace: 'nowrap',
+                              zIndex: 1000,
+                              boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
+                              pointerEvents: 'none'
+                            }}>
+                              Rank change from previous update.<br />
+                              Positive = moved up, Negative = moved down
+                              <div style={{
+                                position: 'absolute',
+                                top: '100%',
+                                left: '50%',
+                                transform: 'translateX(-50%)',
+                                width: 0,
+                                height: 0,
+                                borderLeft: '6px solid transparent',
+                                borderRight: '6px solid transparent',
+                                borderTop: '6px solid #171717'
+                              }}></div>
+                            </div>
+                          )}
+                        </span>
                       </th>
                       <th 
                         onClick={() => handleSort('circPercent')}
@@ -1101,7 +1151,52 @@ export default function App() {
                         onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}
                       >
                         CIRC % {getSortIcon('circPercent')}
-                        <span style={{ display: 'inline-block', marginLeft: '4px', cursor: 'help', fontSize: '12px' }}>?</span>
+                        <span 
+                          style={{ 
+                            display: 'inline-block', 
+                            marginLeft: '4px', 
+                            cursor: 'help', 
+                            fontSize: '12px',
+                            color: '#9ca3af',
+                            position: 'relative'
+                          }}
+                          onMouseEnter={() => setShowCircTooltip(true)}
+                          onMouseLeave={() => setShowCircTooltip(false)}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          ?
+                          {showCircTooltip && (
+                            <div style={{
+                              position: 'absolute',
+                              bottom: '100%',
+                              right: '0',
+                              marginBottom: '8px',
+                              padding: '8px 12px',
+                              backgroundColor: '#171717',
+                              color: 'white',
+                              fontSize: '11px',
+                              borderRadius: '6px',
+                              whiteSpace: 'nowrap',
+                              zIndex: 1000,
+                              boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1)',
+                              pointerEvents: 'none',
+                              textAlign: 'left'
+                            }}>
+                              Percentage of total supply<br />
+                              currently in circulation
+                              <div style={{
+                                position: 'absolute',
+                                top: '100%',
+                                right: '12px',
+                                width: 0,
+                                height: 0,
+                                borderLeft: '6px solid transparent',
+                                borderRight: '6px solid transparent',
+                                borderTop: '6px solid #171717'
+                              }}></div>
+                            </div>
+                          )}
+                        </span>
                       </th>
                     </tr>
                   </thead>
