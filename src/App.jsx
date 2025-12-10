@@ -488,27 +488,66 @@ export default function App() {
             
             // Try detail API first (most accurate) - check for valid numbers
             if (totalSupply != null && circulatingSupply != null && 
+                typeof totalSupply === 'number' && typeof circulatingSupply === 'number' &&
                 !isNaN(totalSupply) && !isNaN(circulatingSupply) &&
+                isFinite(totalSupply) && isFinite(circulatingSupply) &&
                 totalSupply > 0 && circulatingSupply > 0) {
               circPercent = (circulatingSupply / totalSupply) * 100;
+              // Debug for first coin
+              if (index === 0) {
+                console.log(`[DEBUG] Circ % from detail API for ${coin.id}:`, {
+                  circulatingSupply,
+                  totalSupply,
+                  circPercent
+                });
+              }
             } 
-            // Fallback to markets API supply data - CoinGecko markets API includes these fields
-            else if (coin.circulating_supply != null && coin.total_supply != null &&
-                     !isNaN(coin.circulating_supply) && !isNaN(coin.total_supply) &&
-                     coin.total_supply > 0 && coin.circulating_supply > 0) {
-              circPercent = (coin.circulating_supply / coin.total_supply) * 100;
-            }
-            // Last resort: calculate from market cap and price if we have total supply
-            else if (marketCap && currentPrice && currentPrice > 0 && totalSupply && totalSupply > 0) {
-              const calculatedCirculatingSupply = marketCap / currentPrice;
-              if (calculatedCirculatingSupply > 0 && totalSupply > 0) {
-                circPercent = (calculatedCirculatingSupply / totalSupply) * 100;
+            // Fallback to markets API supply data
+            else {
+              const marketCirculating = coin.circulating_supply;
+              const marketTotal = coin.total_supply;
+              
+              if (marketCirculating != null && marketTotal != null &&
+                  typeof marketCirculating === 'number' && typeof marketTotal === 'number' &&
+                  !isNaN(marketCirculating) && !isNaN(marketTotal) &&
+                  isFinite(marketCirculating) && isFinite(marketTotal) &&
+                  marketTotal > 0 && marketCirculating > 0) {
+                circPercent = (marketCirculating / marketTotal) * 100;
+                // Debug for first coin
+                if (index === 0) {
+                  console.log(`[DEBUG] Circ % from markets API for ${coin.id}:`, {
+                    marketCirculating,
+                    marketTotal,
+                    circPercent
+                  });
+                }
+              }
+              // Last resort: calculate from market cap and price if we have total supply
+              else if (marketCap && currentPrice && currentPrice > 0 && totalSupply && totalSupply > 0) {
+                const calculatedCirculatingSupply = marketCap / currentPrice;
+                if (calculatedCirculatingSupply > 0 && totalSupply > 0) {
+                  circPercent = (calculatedCirculatingSupply / totalSupply) * 100;
+                  if (index === 0) {
+                    console.log(`[DEBUG] Circ % calculated from market cap for ${coin.id}:`, {
+                      marketCap,
+                      currentPrice,
+                      calculatedCirculatingSupply,
+                      totalSupply,
+                      circPercent
+                    });
+                  }
+                }
               }
             }
             
-            // Ensure circPercent is a valid number
-            if (circPercent != null && (isNaN(circPercent) || circPercent < 0 || circPercent > 100)) {
-              circPercent = null;
+            // Ensure circPercent is a valid number between 0 and 100
+            if (circPercent != null) {
+              if (isNaN(circPercent) || !isFinite(circPercent) || circPercent < 0) {
+                circPercent = null;
+              } else if (circPercent > 100) {
+                // Some coins have circ > total due to API inconsistencies, cap at 100
+                circPercent = 100;
+              }
             }
             
             // Calculate Delta: ranking change (previous_rank - current_rank)
