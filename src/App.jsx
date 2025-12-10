@@ -207,6 +207,7 @@ export default function App() {
   const [filterNoise, setFilterNoise] = useState(true);
   const [showStablecoins, setShowStablecoins] = useState(false);
   const previousRanksRef = useRef({});
+  const lastCoinsFetchRef = useRef(0);
   
   // Sorting state
   const [sortColumn, setSortColumn] = useState('rank');
@@ -334,6 +335,8 @@ export default function App() {
     try {
       // Add timestamp to prevent caching and ensure live data
       const timestamp = Date.now();
+      lastCoinsFetchRef.current = timestamp;
+      
       const res = await fetch(`${COINGECKO_API}/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=100&page=1&sparkline=false&price_change_percentage=24h&_t=${timestamp}`, { 
         signal: AbortSignal.timeout(20000),
         cache: 'no-cache',
@@ -419,19 +422,31 @@ export default function App() {
             }
             
             // Calculate Circ %: (circulating_supply / total_supply) * 100
-            // Only calculate if we have both values from API
+            // Using real-time data from detail API
             let circPercent = null;
             if (totalSupply && circulatingSupply && totalSupply > 0) {
+              // Use real-time circulating supply and total supply from detail API
               circPercent = (circulatingSupply / totalSupply) * 100;
+            } else if (marketCap && currentPrice && currentPrice > 0) {
+              // Fallback: calculate circulating supply from market cap and price
+              const calculatedCirculatingSupply = marketCap / currentPrice;
+              if (totalSupply && totalSupply > 0) {
+                circPercent = (calculatedCirculatingSupply / totalSupply) * 100;
+              }
             }
             
             // Calculate Delta: ranking change (previous_rank - current_rank)
-            // Positive delta = moved up, negative = moved down
+            // Using real-time rank data from markets API
+            // Positive delta = moved up in ranking, negative = moved down
             const previousRank = previousRanksRef.current[coin.id];
             const currentRank = coin.market_cap_rank || (index + 1);
-            const delta = previousRank && previousRank !== currentRank 
-              ? previousRank - currentRank 
-              : null;
+            
+            // Only show delta if we have a previous rank to compare with
+            // and the rank has actually changed
+            let delta = null;
+            if (previousRank && previousRank !== currentRank) {
+              delta = previousRank - currentRank; // Positive = moved up, negative = moved down
+            }
             
             // Check if stablecoin
             const isStablecoin = ['usdt', 'usdc', 'dai', 'busd', 'tusd', 'usdp', 'usdd', 'frax', 'lusd', 'susd', 'gusd', 'husd', 'ousd', 'usdn', 'usdk', 'usdx', 'usd', 'ust', 'mim'].includes(coin.id?.toLowerCase() || coin.symbol?.toLowerCase() || '');
@@ -507,26 +522,44 @@ export default function App() {
     Promise.all([fetchCoins(), fetchMemes(), fetchTrends(1, false)]).finally(() => setLoading(false));
   }, [fetchCoins, fetchMemes, fetchTrends]);
 
+  // Refresh coins when switching back to coins tab to ensure accurate prices
+  useEffect(() => {
+    if (activeTab === 'all') {
+      // Check if data is stale (older than 30 seconds) and refresh if needed
+      const timeSinceLastFetch = Date.now() - lastCoinsFetchRef.current;
+      if (timeSinceLastFetch > 30000 || lastCoinsFetchRef.current === 0) {
+        // Refresh coins data when user switches to coins tab if data is stale
+        fetchCoins();
+      }
+    }
+  }, [activeTab, fetchCoins]);
+
   // Auto-refresh: coins every 30 seconds (prices change frequently), trends every 2 minutes
   useEffect(() => {
-    // Refresh coins more frequently for real-time prices
+    // Refresh coins more frequently for real-time prices (only when coins tab is active)
     const coinsInterval = setInterval(() => {
-      fetchCoins();
+      if (activeTab === 'all') {
+        fetchCoins();
+      }
     }, 30000); // 30 seconds for coins
     
     // Refresh trends and memes less frequently
     const trendsInterval = setInterval(() => {
-      setPage(1);
-      setHasMore(true);
-      fetchTrends(1, false);
-      fetchMemes();
+      if (activeTab === 'trends') {
+        setPage(1);
+        setHasMore(true);
+        fetchTrends(1, false);
+      }
+      if (activeTab === 'memes') {
+        fetchMemes();
+      }
     }, 120000); // 2 minutes for trends/memes
     
     return () => {
       clearInterval(coinsInterval);
       clearInterval(trendsInterval);
     };
-  }, [fetchTrends, fetchCoins, fetchMemes]);
+  }, [fetchTrends, fetchCoins, fetchMemes, activeTab]);
 
   const filteredTrends = useMemo(() => {
     let t = [...trends];
