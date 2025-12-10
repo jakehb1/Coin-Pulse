@@ -1089,7 +1089,7 @@ export default function App() {
             <div style={{ display: 'flex', gap: '24px', alignItems: 'center', flexWrap: 'wrap', width: '100%' }}>
               {/* Filter Noise Toggle */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                <label style={{ 
+                <div style={{ 
                   display: 'flex', 
                   alignItems: 'center', 
                   gap: '8px', 
@@ -1097,21 +1097,28 @@ export default function App() {
                   fontSize: '14px',
                   color: '#525252'
                 }}>
-                  <input
-                    type="checkbox"
-                    checked={filterNoise}
-                    onChange={(e) => setFilterNoise(e.target.checked)}
-                    style={{ display: 'none' }}
-                  />
-                  <div style={{
-                    width: '44px',
-                    height: '24px',
-                    borderRadius: '12px',
-                    backgroundColor: filterNoise ? '#22c55e' : '#d1d5db',
-                    position: 'relative',
-                    transition: 'background-color 0.2s',
-                    cursor: 'pointer'
-                  }} onClick={() => setFilterNoise(!filterNoise)}>
+                  <div 
+                    style={{
+                      width: '44px',
+                      height: '24px',
+                      borderRadius: '12px',
+                      backgroundColor: filterNoise ? '#22c55e' : '#d1d5db',
+                      position: 'relative',
+                      transition: 'background-color 0.2s',
+                      cursor: 'pointer',
+                      flexShrink: 0
+                    }} 
+                    onClick={() => setFilterNoise(!filterNoise)}
+                    role="switch"
+                    aria-checked={filterNoise}
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        setFilterNoise(!filterNoise);
+                      }
+                    }}
+                  >
                     <div style={{
                       width: '20px',
                       height: '20px',
@@ -1124,8 +1131,8 @@ export default function App() {
                       boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
                     }}></div>
                   </div>
-                  <span>Filter Noise ?</span>
-                </label>
+                  <span onClick={() => setFilterNoise(!filterNoise)} style={{ cursor: 'pointer' }}>Filter Noise ?</span>
+                </div>
                 <span style={{ fontSize: '12px', color: '#737373', marginLeft: '52px' }}>
                   {hiddenByNoise} hidden
                 </span>
@@ -1133,7 +1140,7 @@ export default function App() {
 
               {/* Show Stablecoins Toggle */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                <label style={{ 
+                <div style={{ 
                   display: 'flex', 
                   alignItems: 'center', 
                   gap: '8px', 
@@ -1141,21 +1148,28 @@ export default function App() {
                   fontSize: '14px',
                   color: '#525252'
                 }}>
-                  <input
-                    type="checkbox"
-                    checked={showStablecoins}
-                    onChange={(e) => setShowStablecoins(e.target.checked)}
-                    style={{ display: 'none' }}
-                  />
-                  <div style={{
-                    width: '44px',
-                    height: '24px',
-                    borderRadius: '12px',
-                    backgroundColor: showStablecoins ? '#22c55e' : '#d1d5db',
-                    position: 'relative',
-                    transition: 'background-color 0.2s',
-                    cursor: 'pointer'
-                  }} onClick={() => setShowStablecoins(!showStablecoins)}>
+                  <div 
+                    style={{
+                      width: '44px',
+                      height: '24px',
+                      borderRadius: '12px',
+                      backgroundColor: showStablecoins ? '#22c55e' : '#d1d5db',
+                      position: 'relative',
+                      transition: 'background-color 0.2s',
+                      cursor: 'pointer',
+                      flexShrink: 0
+                    }} 
+                    onClick={() => setShowStablecoins(!showStablecoins)}
+                    role="switch"
+                    aria-checked={showStablecoins}
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        setShowStablecoins(!showStablecoins);
+                      }
+                    }}
+                  >
                     <div style={{
                       width: '20px',
                       height: '20px',
@@ -1168,8 +1182,8 @@ export default function App() {
                       boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
                     }}></div>
                   </div>
-                  <span>Show Stablecoins ?</span>
-                </label>
+                  <span onClick={() => setShowStablecoins(!showStablecoins)} style={{ cursor: 'pointer' }}>Show Stablecoins ?</span>
+                </div>
                 <span style={{ fontSize: '12px', color: '#737373', marginLeft: '52px' }}>
                   {hiddenByStablecoins} hidden
                 </span>
