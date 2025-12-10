@@ -204,13 +204,20 @@ export default async function handler(req, res) {
 
 // Fetch Hacker News - get more stories for more topics
 async function fetchHackerNews() {
-  const topRes = await fetch('https://hacker-news.firebaseio.com/v0/topstories.json');
+  const timestamp = Date.now();
+  const topRes = await fetch(`https://hacker-news.firebaseio.com/v0/topstories.json?_t=${timestamp}`, {
+    cache: 'no-cache',
+    headers: { 'Cache-Control': 'no-cache' }
+  });
   const topIds = await topRes.json();
   
   const stories = await Promise.all(
     topIds.slice(0, 50).map(async (id) => {
       try {
-        const r = await fetch(`https://hacker-news.firebaseio.com/v0/item/${id}.json`);
+        const r = await fetch(`https://hacker-news.firebaseio.com/v0/item/${id}.json?_t=${timestamp}`, {
+          cache: 'no-cache',
+          headers: { 'Cache-Control': 'no-cache' }
+        });
         return await r.json();
       } catch { return null; }
     })
@@ -247,7 +254,14 @@ async function fetchHackerNews() {
 
 // Fetch CoinGecko trending - WITH NULL SAFETY
 async function fetchCryptoTrending() {
-  const res = await fetch('https://api.coingecko.com/api/v3/search/trending', { headers: { 'Accept': 'application/json' } });
+  const timestamp = Date.now();
+  const res = await fetch(`https://api.coingecko.com/api/v3/search/trending?_t=${timestamp}`, { 
+    headers: { 
+      'Accept': 'application/json',
+      'Cache-Control': 'no-cache'
+    },
+    cache: 'no-cache'
+  });
   if (!res.ok) throw new Error(`CoinGecko: ${res.status}`);
   const data = await res.json();
   
@@ -270,7 +284,14 @@ async function fetchCryptoTrending() {
 
 // Fetch GeckoTerminal DEX trending - WITH NULL SAFETY
 async function fetchDexTrending() {
-  const res = await fetch('https://api.geckoterminal.com/api/v2/networks/solana/trending_pools', { headers: { 'Accept': 'application/json' } });
+  const timestamp = Date.now();
+  const res = await fetch(`https://api.geckoterminal.com/api/v2/networks/solana/trending_pools?_t=${timestamp}`, { 
+    headers: { 
+      'Accept': 'application/json',
+      'Cache-Control': 'no-cache'
+    },
+    cache: 'no-cache'
+  });
   if (!res.ok) throw new Error(`GeckoTerminal: ${res.status}`);
   const data = await res.json();
   
@@ -298,10 +319,16 @@ async function fetchLemmy() {
   const instances = ['https://lemmy.world', 'https://lemmy.ml', 'https://programming.dev'];
   const allPosts = [];
   
+  const timestamp = Date.now();
   for (const instance of instances) {
     try {
-      const response = await fetch(`${instance}/api/v3/post/list?sort=Hot&limit=40&type_=All`, {
-        headers: { 'Accept': 'application/json', 'User-Agent': 'Pulse/1.0' }
+      const response = await fetch(`${instance}/api/v3/post/list?sort=Hot&limit=40&type_=All&_t=${timestamp}`, {
+        headers: { 
+          'Accept': 'application/json', 
+          'User-Agent': 'Pulse/1.0',
+          'Cache-Control': 'no-cache'
+        },
+        cache: 'no-cache'
       });
       if (response.ok) {
         const data = await response.json();
@@ -347,8 +374,16 @@ async function fetchWikipedia() {
   const month = String(now.getMonth() + 1).padStart(2, '0');
   const day = String(now.getDate()).padStart(2, '0');
   
-  const url = `https://wikimedia.org/api/rest_v1/metrics/pageviews/top/en.wikipedia/all-access/${year}/${month}/${day}`;
-  const response = await fetch(url, { headers: { 'User-Agent': 'Pulse/1.0', 'Accept': 'application/json' } });
+  const timestamp = Date.now();
+  const url = `https://wikimedia.org/api/rest_v1/metrics/pageviews/top/en.wikipedia/all-access/${year}/${month}/${day}?_t=${timestamp}`;
+  const response = await fetch(url, { 
+    headers: { 
+      'User-Agent': 'Pulse/1.0', 
+      'Accept': 'application/json',
+      'Cache-Control': 'no-cache'
+    },
+    cache: 'no-cache'
+  });
   
   if (!response.ok) throw new Error(`Wikipedia: ${response.status}`);
   

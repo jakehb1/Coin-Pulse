@@ -231,7 +231,17 @@ export default function App() {
     }
     
     try {
-      const res = await fetch(`/api/aggregate?page=${pageNum}&limit=15`, { signal: AbortSignal.timeout(30000) });
+      // Add timestamp to prevent caching and ensure live data
+      const timestamp = Date.now();
+      const res = await fetch(`/api/aggregate?page=${pageNum}&limit=15&_t=${timestamp}`, { 
+        signal: AbortSignal.timeout(30000),
+        cache: 'no-cache',
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0'
+        }
+      });
       const responseText = await res.text();
       
       if (res.ok) {
@@ -322,7 +332,16 @@ export default function App() {
 
   const fetchCoins = useCallback(async () => {
     try {
-      const res = await fetch(`${COINGECKO_API}/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=100&page=1&sparkline=false&price_change_percentage=24h`, { signal: AbortSignal.timeout(20000) });
+      // Add timestamp to prevent caching and ensure live data
+      const timestamp = Date.now();
+      const res = await fetch(`${COINGECKO_API}/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=100&page=1&sparkline=false&price_change_percentage=24h&_t=${timestamp}`, { 
+        signal: AbortSignal.timeout(20000),
+        cache: 'no-cache',
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache'
+        }
+      });
       if (res.ok) {
         const coins = await res.json();
         if (coins?.length) {
@@ -341,9 +360,17 @@ export default function App() {
             await Promise.all(
               batch.map(async (id) => {
                 try {
+                  // Add timestamp to prevent caching
+                  const detailTimestamp = Date.now();
                   const detailRes = await fetch(
-                    `${COINGECKO_API}/coins/${id}?localization=false&tickers=false&market_data=true&community_data=false&developer_data=false&sparkline=false`,
-                    { signal: AbortSignal.timeout(8000) }
+                    `${COINGECKO_API}/coins/${id}?localization=false&tickers=false&market_data=true&community_data=false&developer_data=false&sparkline=false&_t=${detailTimestamp}`,
+                    { 
+                      signal: AbortSignal.timeout(8000),
+                      cache: 'no-cache',
+                      headers: {
+                        'Cache-Control': 'no-cache, no-store, must-revalidate'
+                      }
+                    }
                   );
                   if (detailRes.ok) {
                     const detailData = await detailRes.json();
@@ -427,12 +454,31 @@ export default function App() {
 
   const fetchMemes = useCallback(async () => {
     try {
-      const res = await fetch(`${DEXSCREENER_API}/token-boosts/top/v1`, { signal: AbortSignal.timeout(10000) });
+      // Add timestamp to prevent caching and ensure live data
+      const timestamp = Date.now();
+      const res = await fetch(`${DEXSCREENER_API}/token-boosts/top/v1?_t=${timestamp}`, { 
+        signal: AbortSignal.timeout(10000),
+        cache: 'no-cache',
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache'
+        }
+      });
       if (res.ok) {
         const boosts = await res.json();
         if (boosts?.length > 3) {
           const pairs = await Promise.all(boosts.slice(0, 15).map(async t => {
-            try { const r = await fetch(`${DEXSCREENER_API}/latest/dex/tokens/${t.tokenAddress}`); const d = await r.json(); return d.pairs?.[0] ? { id: d.pairs[0].baseToken?.address, symbol: d.pairs[0].baseToken?.symbol, name: d.pairs[0].baseToken?.name, price: parseFloat(d.pairs[0].priceUsd || 0), priceChange24h: parseFloat(d.pairs[0].priceChange?.h24 || 0), marketCap: parseFloat(d.pairs[0].fdv || 0), volume24h: parseFloat(d.pairs[0].volume?.h24 || 0), chain: d.pairs[0].chainId } : null; } catch { return null; }
+            try { 
+              const tokenTimestamp = Date.now();
+              const r = await fetch(`${DEXSCREENER_API}/latest/dex/tokens/${t.tokenAddress}?_t=${tokenTimestamp}`, {
+                cache: 'no-cache',
+                headers: {
+                  'Cache-Control': 'no-cache, no-store, must-revalidate'
+                }
+              }); 
+              const d = await r.json(); 
+              return d.pairs?.[0] ? { id: d.pairs[0].baseToken?.address, symbol: d.pairs[0].baseToken?.symbol, name: d.pairs[0].baseToken?.name, price: parseFloat(d.pairs[0].priceUsd || 0), priceChange24h: parseFloat(d.pairs[0].priceChange?.h24 || 0), marketCap: parseFloat(d.pairs[0].fdv || 0), volume24h: parseFloat(d.pairs[0].volume?.h24 || 0), chain: d.pairs[0].chainId } : null; 
+            } catch { return null; }
           }));
           const valid = pairs.filter(Boolean);
           if (valid.length > 3) { setMemeData(valid.map(p => generateFlowData(p, true))); return; }
@@ -589,7 +635,7 @@ export default function App() {
             />
             <h1 style={{ fontSize: '32px', fontWeight: '700', color: '#171717', margin: 0, letterSpacing: '-0.02em' }}>
               {activeTab === 'trends' ? '🔥 Trends' : activeTab === 'memes' ? '🐸 Memes' : 'pulse.ai'}
-            </h1>
+          </h1>
           </div>
           <p style={{ fontSize: '12px', color: '#737373', margin: '0 0 10px' }}>
             {activeTab === 'trends' ? 'Real-time cross-platform trend detection' : activeTab === 'memes' ? 'Live from DexScreener' : 'Live prices'}
