@@ -630,7 +630,7 @@ export default function App() {
               fontWeight: '700', 
               color: '#171717', 
               margin: 0,
-              fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+              fontFamily: '"PlayExtraUnlicensed-VAR", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
               letterSpacing: '-0.02em',
               textTransform: 'none'
             }}>
