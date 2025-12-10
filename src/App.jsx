@@ -358,52 +358,80 @@ export default function App() {
       });
       if (res.ok) {
         const coins = await res.json();
+        console.log('[DEBUG] Markets API response sample:', coins[0] ? {
+          id: coins[0].id,
+          current_price: coins[0].current_price,
+          circulating_supply: coins[0].circulating_supply,
+          total_supply: coins[0].total_supply,
+          market_cap: coins[0].market_cap
+        } : 'No coins');
         if (coins?.length) {
-          // Fetch supply data for all 100 coins (not just top 50) to ensure circ % is calculated
+          // Fetch supply data for top 100 coins to ensure circ % is calculated
+          // Use detail API for more accurate supply data
           const allCoinIds = coins.map(c => c.id);
           const supplyDataMap = new Map();
           
-          // Fetch in batches of 10 to avoid rate limits
-          for (let i = 0; i < allCoinIds.length; i += 10) {
-            const batch = allCoinIds.slice(i, i + 10);
-            await Promise.all(
-              batch.map(async (id) => {
-                try {
-                  // Add unique timestamp to prevent caching
-                  const detailTimestamp = Date.now();
-                  const detailUniqueId = `${detailTimestamp}-${Math.random().toString(36).substring(7)}`;
-                  const detailRes = await fetch(
-                    `${COINGECKO_API}/coins/${id}?localization=false&tickers=false&market_data=true&community_data=false&developer_data=false&sparkline=false&_t=${detailUniqueId}`,
-                    { 
-                      signal: AbortSignal.timeout(8000),
-                      cache: 'no-store',
-                      headers: {
-                        'Cache-Control': 'no-cache, no-store, must-revalidate, max-age=0',
-                        'Pragma': 'no-cache',
-                        'Expires': '0',
-                        'If-None-Match': '*'
-                      }
+          // Fetch in batches of 10 to avoid rate limits (CoinGecko allows 10-50 calls/minute)
+          // Process all coins but with proper rate limiting
+          const batchSize = 10;
+          const delayBetweenBatches = 1200; // 1.2 seconds between batches to stay under rate limit
+          
+          for (let i = 0; i < allCoinIds.length; i += batchSize) {
+            const batch = allCoinIds.slice(i, i + batchSize);
+            const batchPromises = batch.map(async (id) => {
+              try {
+                // Add unique timestamp to prevent caching
+                const detailTimestamp = Date.now();
+                const detailUniqueId = `${detailTimestamp}-${Math.random().toString(36).substring(7)}`;
+                const detailRes = await fetch(
+                  `${COINGECKO_API}/coins/${id}?localization=false&tickers=false&market_data=true&community_data=false&developer_data=false&sparkline=false&_t=${detailUniqueId}`,
+                  { 
+                    signal: AbortSignal.timeout(10000), // Increased timeout
+                    cache: 'no-store',
+                    headers: {
+                      'Cache-Control': 'no-cache, no-store, must-revalidate, max-age=0',
+                      'Pragma': 'no-cache',
+                      'Expires': '0',
+                      'If-None-Match': '*'
                     }
-                  );
-                  if (detailRes.ok) {
-                    const detailData = await detailRes.json();
-                    supplyDataMap.set(id, {
-                      totalSupply: detailData.market_data?.total_supply,
-                      circulatingSupply: detailData.market_data?.circulating_supply,
-                      marketCap: detailData.market_data?.market_cap?.usd,
-                      // Use price from detail API as it's more recent and accurate
-                      currentPrice: detailData.market_data?.current_price?.usd,
-                      priceChange24h: detailData.market_data?.price_change_percentage_24h
-                    });
                   }
-                } catch {}
-              })
-            );
-            // Add delay between batches to avoid rate limits
-            if (i + 10 < allCoinIds.length) {
-              await new Promise(resolve => setTimeout(resolve, 200));
+                );
+                if (detailRes.ok) {
+                  const detailData = await detailRes.json();
+                  const supplyData = {
+                    totalSupply: detailData.market_data?.total_supply,
+                    circulatingSupply: detailData.market_data?.circulating_supply,
+                    marketCap: detailData.market_data?.market_cap?.usd,
+                    // Use price from detail API as it's more recent and accurate
+                    currentPrice: detailData.market_data?.current_price?.usd,
+                    priceChange24h: detailData.market_data?.price_change_percentage_24h
+                  };
+                  supplyDataMap.set(id, supplyData);
+                  // Debug first few
+                  if (i < 3) {
+                    console.log(`[DEBUG] Detail API for ${id}:`, supplyData);
+                  }
+                  return true;
+                } else {
+                  console.warn(`[DEBUG] Detail API failed for ${id}:`, detailRes.status);
+                  return false;
+                }
+              } catch (err) {
+                console.warn(`[DEBUG] Detail API error for ${id}:`, err.message);
+                return false;
+              }
+            });
+            
+            // Wait for batch to complete
+            await Promise.all(batchPromises);
+            
+            // Add delay between batches to avoid rate limits (except for last batch)
+            if (i + batchSize < allCoinIds.length) {
+              await new Promise(resolve => setTimeout(resolve, delayBetweenBatches));
             }
           }
+          
+          console.log(`[DEBUG] Completed fetching detail data for ${supplyDataMap.size} coins`);
           
           // Store current ranks for delta calculation on next fetch
           const currentRanks = {};
@@ -458,12 +486,16 @@ export default function App() {
             // Using real-time data from detail API, with fallbacks to markets API
             let circPercent = null;
             
-            // Try detail API first (most accurate)
-            if (totalSupply && circulatingSupply && totalSupply > 0 && circulatingSupply > 0) {
+            // Try detail API first (most accurate) - check for valid numbers
+            if (totalSupply != null && circulatingSupply != null && 
+                !isNaN(totalSupply) && !isNaN(circulatingSupply) &&
+                totalSupply > 0 && circulatingSupply > 0) {
               circPercent = (circulatingSupply / totalSupply) * 100;
             } 
-            // Fallback to markets API supply data
-            else if (coin.circulating_supply && coin.total_supply && coin.total_supply > 0) {
+            // Fallback to markets API supply data - CoinGecko markets API includes these fields
+            else if (coin.circulating_supply != null && coin.total_supply != null &&
+                     !isNaN(coin.circulating_supply) && !isNaN(coin.total_supply) &&
+                     coin.total_supply > 0 && coin.circulating_supply > 0) {
               circPercent = (coin.circulating_supply / coin.total_supply) * 100;
             }
             // Last resort: calculate from market cap and price if we have total supply
@@ -472,6 +504,11 @@ export default function App() {
               if (calculatedCirculatingSupply > 0 && totalSupply > 0) {
                 circPercent = (calculatedCirculatingSupply / totalSupply) * 100;
               }
+            }
+            
+            // Ensure circPercent is a valid number
+            if (circPercent != null && (isNaN(circPercent) || circPercent < 0 || circPercent > 100)) {
+              circPercent = null;
             }
             
             // Calculate Delta: ranking change (previous_rank - current_rank)
@@ -505,6 +542,24 @@ export default function App() {
             };
             
             const baseData = generateFlowData(updatedCoin, false);
+            
+            // Debug logging for first few coins
+            if (index < 3) {
+              console.log(`[DEBUG] Coin ${coin.id}:`, {
+                marketsPrice,
+                detailPrice,
+                currentPrice,
+                circulatingSupply,
+                totalSupply,
+                coinCirculatingSupply: coin.circulating_supply,
+                coinTotalSupply: coin.total_supply,
+                circPercent,
+                previousRank,
+                currentRank,
+                delta
+              });
+            }
+            
             return {
               ...baseData,
               // Override price to ensure we use the validated currentPrice, not generateFlowData's fallback
@@ -520,8 +575,24 @@ export default function App() {
           });
           
           // Update previous ranks for next delta calculation
-          previousRanksRef.current = currentRanks;
+          // Only update if we have data, otherwise keep existing ranks
+          if (Object.keys(currentRanks).length > 0) {
+            previousRanksRef.current = currentRanks;
+          }
+          
+          console.log('[DEBUG] Updated previousRanksRef:', previousRanksRef.current);
+          console.log('[DEBUG] Enhanced coins sample:', enhancedCoins.slice(0, 3).map(c => ({
+            id: c.id,
+            name: c.name,
+            price: c.price,
+            circPercent: c.circPercent,
+            delta: c.delta,
+            rank: c.rank
+          })));
+          console.log('[DEBUG] Supply data map size:', supplyDataMap.size);
+          
           setData(enhancedCoins);
+          setLastUpdated(new Date());
           return;
         }
       }
@@ -587,6 +658,7 @@ export default function App() {
     // Refresh coins more frequently for real-time prices (only when coins tab is active)
     const coinsInterval = setInterval(() => {
       if (activeTab === 'all') {
+        console.log('[DEBUG] Auto-refreshing coins data...');
         fetchCoins();
       }
     }, 30000); // 30 seconds for coins
@@ -1132,27 +1204,33 @@ export default function App() {
                             cursor: 'help', 
                             fontSize: '12px',
                             color: '#9ca3af',
-                            position: 'relative'
+                            position: 'relative',
+                            zIndex: 10000
                           }}
-                          onMouseEnter={() => setShowDeltaTooltip(true)}
-                          onMouseLeave={() => setShowDeltaTooltip(false)}
+                          onMouseEnter={(e) => {
+                            e.stopPropagation();
+                            setShowDeltaTooltip(true);
+                          }}
+                          onMouseLeave={(e) => {
+                            e.stopPropagation();
+                            setShowDeltaTooltip(false);
+                          }}
                           onClick={(e) => e.stopPropagation()}
                         >
                           ?
-                          {showDeltaTooltip && deltaTooltipRef.current && (
+                          {showDeltaTooltip && (
                             <div style={{
                               position: 'absolute',
-                              bottom: '100%',
+                              bottom: 'calc(100% + 8px)',
                               left: '50%',
                               transform: 'translateX(-50%)',
-                              marginBottom: '8px',
                               padding: '8px 12px',
                               backgroundColor: '#171717',
                               color: 'white',
                               fontSize: '11px',
                               borderRadius: '6px',
                               whiteSpace: 'nowrap',
-                              zIndex: 9999,
+                              zIndex: 10001,
                               boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
                               pointerEvents: 'none',
                               maxWidth: '250px',
@@ -1202,26 +1280,32 @@ export default function App() {
                             cursor: 'help', 
                             fontSize: '12px',
                             color: '#9ca3af',
-                            position: 'relative'
+                            position: 'relative',
+                            zIndex: 10000
                           }}
-                          onMouseEnter={() => setShowCircTooltip(true)}
-                          onMouseLeave={() => setShowCircTooltip(false)}
+                          onMouseEnter={(e) => {
+                            e.stopPropagation();
+                            setShowCircTooltip(true);
+                          }}
+                          onMouseLeave={(e) => {
+                            e.stopPropagation();
+                            setShowCircTooltip(false);
+                          }}
                           onClick={(e) => e.stopPropagation()}
                         >
                           ?
-                          {showCircTooltip && circTooltipRef.current && (
+                          {showCircTooltip && (
                             <div style={{
                               position: 'absolute',
-                              bottom: '100%',
+                              bottom: 'calc(100% + 8px)',
                               right: '0',
-                              marginBottom: '8px',
                               padding: '8px 12px',
                               backgroundColor: '#171717',
                               color: 'white',
                               fontSize: '11px',
                               borderRadius: '6px',
                               whiteSpace: 'nowrap',
-                              zIndex: 9999,
+                              zIndex: 10001,
                               boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06)',
                               pointerEvents: 'none',
                               textAlign: 'left'
