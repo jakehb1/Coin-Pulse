@@ -625,14 +625,17 @@ export default function App() {
       <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
         <div style={{ textAlign: 'center', marginBottom: '20px' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '8px' }}>
-            <img 
-              src="/pulse.svg" 
-              alt="pulse.ai" 
-              style={{ height: '50px', width: 'auto' }}
-              onError={(e) => {
-                e.target.style.display = 'none';
-              }}
-            />
+            <h1 style={{ 
+              fontSize: '48px', 
+              fontWeight: '700', 
+              color: '#171717', 
+              margin: 0,
+              fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+              letterSpacing: '-0.02em',
+              textTransform: 'none'
+            }}>
+              Pulse
+          </h1>
           </div>
           <p style={{ fontSize: '12px', color: '#737373', margin: '0 0 10px' }}>
             {activeTab === 'trends' ? 'Real-time cross-platform trend detection' : activeTab === 'memes' ? 'Live from DexScreener' : 'Live prices'}
