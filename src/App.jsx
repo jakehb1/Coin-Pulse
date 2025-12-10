@@ -345,6 +345,7 @@ export default function App() {
       
       // Use unique timestamp and random to ensure no caching
       const uniqueId = `${timestamp}-${Math.random().toString(36).substring(7)}`;
+      // Request supply data in markets API response
       const res = await fetch(`${COINGECKO_API}/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=100&page=1&sparkline=false&price_change_percentage=24h&_t=${uniqueId}`, { 
         signal: AbortSignal.timeout(20000),
         cache: 'no-store',
@@ -358,12 +359,13 @@ export default function App() {
       if (res.ok) {
         const coins = await res.json();
         if (coins?.length) {
-          // Fetch supply data for top 50 coins
-          const topCoinIds = coins.slice(0, 50).map(c => c.id);
+          // Fetch supply data for all 100 coins (not just top 50) to ensure circ % is calculated
+          const allCoinIds = coins.map(c => c.id);
           const supplyDataMap = new Map();
           
-          for (let i = 0; i < topCoinIds.length; i += 10) {
-            const batch = topCoinIds.slice(i, i + 10);
+          // Fetch in batches of 10 to avoid rate limits
+          for (let i = 0; i < allCoinIds.length; i += 10) {
+            const batch = allCoinIds.slice(i, i + 10);
             await Promise.all(
               batch.map(async (id) => {
                 try {
@@ -397,7 +399,8 @@ export default function App() {
                 } catch {}
               })
             );
-            if (i + 10 < topCoinIds.length) {
+            // Add delay between batches to avoid rate limits
+            if (i + 10 < allCoinIds.length) {
               await new Promise(resolve => setTimeout(resolve, 200));
             }
           }
@@ -452,21 +455,23 @@ export default function App() {
             }
             
             // Calculate Circ %: (circulating_supply / total_supply) * 100
-            // Using real-time data from detail API
+            // Using real-time data from detail API, with fallbacks to markets API
             let circPercent = null;
+            
+            // Try detail API first (most accurate)
             if (totalSupply && circulatingSupply && totalSupply > 0 && circulatingSupply > 0) {
-              // Use real-time circulating supply and total supply from detail API
               circPercent = (circulatingSupply / totalSupply) * 100;
-            } else if (marketCap && currentPrice && currentPrice > 0 && totalSupply && totalSupply > 0) {
-              // Fallback: calculate circulating supply from market cap and price
+            } 
+            // Fallback to markets API supply data
+            else if (coin.circulating_supply && coin.total_supply && coin.total_supply > 0) {
+              circPercent = (coin.circulating_supply / coin.total_supply) * 100;
+            }
+            // Last resort: calculate from market cap and price if we have total supply
+            else if (marketCap && currentPrice && currentPrice > 0 && totalSupply && totalSupply > 0) {
               const calculatedCirculatingSupply = marketCap / currentPrice;
               if (calculatedCirculatingSupply > 0 && totalSupply > 0) {
                 circPercent = (calculatedCirculatingSupply / totalSupply) * 100;
               }
-            }
-            // If still null, try to get from markets API data
-            if (circPercent === null && coin.circulating_supply && coin.total_supply && coin.total_supply > 0) {
-              circPercent = (coin.circulating_supply / coin.total_supply) * 100;
             }
             
             // Calculate Delta: ranking change (previous_rank - current_rank)
@@ -477,12 +482,16 @@ export default function App() {
             
             const previousRank = previousRanksRef.current[coin.id];
             
-            // Calculate delta - show 0 if no change, otherwise show the change
-            let delta = 0;
-            if (previousRank !== undefined && previousRank !== null && previousRank !== currentRank) {
-              delta = previousRank - currentRank; // Positive = moved up, negative = moved down
+            // Calculate delta - null if no previous rank (first load), 0 if no change, otherwise show the change
+            let delta = null;
+            if (previousRank !== undefined && previousRank !== null) {
+              if (previousRank !== currentRank) {
+                delta = previousRank - currentRank; // Positive = moved up, negative = moved down
+              } else {
+                delta = 0; // No change in rank
+              }
             }
-            // If no previous rank, delta stays 0 (no change to show)
+            // If no previous rank (first load), delta stays null (will show "-")
             
             // Check if stablecoin
             const isStablecoin = ['usdt', 'usdc', 'dai', 'busd', 'tusd', 'usdp', 'usdd', 'frax', 'lusd', 'susd', 'gusd', 'husd', 'ousd', 'usdn', 'usdk', 'usdx', 'usd', 'ust', 'mim'].includes(coin.id?.toLowerCase() || coin.symbol?.toLowerCase() || '');
@@ -1238,7 +1247,7 @@ export default function App() {
                   <tbody>
                     {filteredData.map((coin, index) => {
                       const isPositive = coin.priceChange24h >= 0;
-                      const deltaValue = coin.delta !== null && coin.delta !== undefined ? coin.delta : 0;
+                      const deltaValue = coin.delta !== null && coin.delta !== undefined ? coin.delta : null;
                       const circPercent = coin.circPercent !== null && coin.circPercent !== undefined ? coin.circPercent : null;
                       const circColor = circPercent !== null && circPercent >= 90 ? '#22c55e' : circPercent !== null && circPercent >= 70 ? '#f59e0b' : '#f97316';
                       
@@ -1336,18 +1345,22 @@ export default function App() {
                             )}
                           </td>
                           <td style={{ padding: '16px', textAlign: 'center' }}>
-                            {deltaValue !== 0 ? (
-                              <span style={{
-                                display: 'inline-block',
-                                padding: '4px 8px',
-                                borderRadius: '4px',
-                                backgroundColor: deltaValue > 0 ? '#dcfce7' : deltaValue < 0 ? '#fee2e2' : '#f5f5f5',
-                                color: deltaValue > 0 ? '#16a34a' : deltaValue < 0 ? '#dc2626' : '#737373',
-                                fontSize: '12px',
-                                fontWeight: '600'
-                              }}>
-                                {deltaValue > 0 ? '+' : ''}{deltaValue}
-                              </span>
+                            {deltaValue !== null && deltaValue !== undefined ? (
+                              deltaValue !== 0 ? (
+                                <span style={{
+                                  display: 'inline-block',
+                                  padding: '4px 8px',
+                                  borderRadius: '4px',
+                                  backgroundColor: deltaValue > 0 ? '#dcfce7' : deltaValue < 0 ? '#fee2e2' : '#f5f5f5',
+                                  color: deltaValue > 0 ? '#16a34a' : deltaValue < 0 ? '#dc2626' : '#737373',
+                                  fontSize: '12px',
+                                  fontWeight: '600'
+                                }}>
+                                  {deltaValue > 0 ? '+' : ''}{deltaValue}
+                                </span>
+                              ) : (
+                                <span style={{ color: '#9ca3af', fontSize: '12px' }}>0</span>
+                              )
                             ) : (
                               <span style={{ color: '#d1d5db', fontSize: '12px' }}>-</span>
                             )}
