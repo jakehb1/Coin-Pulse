@@ -315,27 +315,15 @@ export default function App() {
     }
   }, [loadingMore, hasMore, page, fetchTrends, searchQuery, launchFilter]);
 
-  // Load more memes
-  const loadMoreMemes = useCallback(() => {
-    if (!memeLoadingMore && hasMore && !searchQuery.trim() && activeTab === 'memes') {
-      const nextPage = memePage + 1;
-      setMemePage(nextPage);
-      fetchMemes(nextPage, true);
-    }
-  }, [memeLoadingMore, hasMore, memePage, fetchMemes, searchQuery, activeTab]);
 
-  // Intersection Observer for infinite scroll (trends and memes)
+  // Intersection Observer for infinite scroll
   useEffect(() => {
     if (observerRef.current) observerRef.current.disconnect();
     
     observerRef.current = new IntersectionObserver(
       (entries) => {
-        if (entries[0].isIntersecting && hasMore && !loadingMore && !memeLoadingMore) {
-          if (activeTab === 'trends') {
+        if (entries[0].isIntersecting && hasMore && !loadingMore && activeTab === 'trends') {
           loadMoreTrends();
-          } else if (activeTab === 'memes') {
-            loadMoreMemes();
-          }
         }
       },
       { threshold: 0.1, rootMargin: '100px' }
@@ -348,7 +336,7 @@ export default function App() {
     return () => {
       if (observerRef.current) observerRef.current.disconnect();
     };
-  }, [hasMore, loadingMore, memeLoadingMore, loadMoreTrends, loadMoreMemes, activeTab]);
+  }, [hasMore, loadingMore, loadMoreTrends, activeTab]);
 
   // Reset pagination when filters change
   useEffect(() => {
@@ -863,7 +851,7 @@ export default function App() {
 
   useEffect(() => {
     setLoading(true);
-    Promise.all([fetchCoins(), fetchMemes(1, false), fetchTrends(1, false)]).finally(() => setLoading(false));
+    Promise.all([fetchCoins(), fetchMemes(), fetchTrends(1, false)]).finally(() => setLoading(false));
   }, [fetchCoins, fetchMemes, fetchTrends]);
 
   // Refresh coins when switching back to coins tab to ensure accurate prices
@@ -896,9 +884,7 @@ export default function App() {
       fetchTrends(1, false);
       }
       if (activeTab === 'memes') {
-        setMemePage(1);
-        setHasMore(true);
-        fetchMemes(1, false);
+      fetchMemes();
       }
     }, 120000); // 2 minutes for trends/memes
     
@@ -1024,19 +1010,12 @@ export default function App() {
 
   // Handle refresh button
   const handleRefresh = () => {
-    if (activeTab === 'trends') {
     setPage(1);
     setHasMore(true);
     setTrends([]);
     fetchTrends(1, false);
-    } else if (activeTab === 'memes') {
-      setMemePage(1);
-      setHasMore(true);
-      setAllMemesCache([]);
-      setMemeData([]);
-      fetchMemes(1, false);
-    }
     fetchCoins();
+    fetchMemes();
   };
 
   return (
@@ -1775,17 +1754,6 @@ export default function App() {
                     );
                   })}
                   
-                  {/* Infinite scroll sentinel for memes */}
-                  {!searchQuery.trim() && (
-                    <div ref={loadMoreRef} style={{ padding: '20px', textAlign: 'center' }}>
-                      {memeLoadingMore && <div style={{ color: '#737373' }}>Loading more memes...</div>}
-                      {!hasMore && filteredData.length > 0 && (
-                        <div style={{ color: '#a3a3a3', fontSize: '13px', padding: '20px' }}>
-                          ✓ All {allMemesCache.length} meme coins loaded
-                </div>
-                      )}
-              </div>
-            )}
                 </div>
               </div>
             )}
