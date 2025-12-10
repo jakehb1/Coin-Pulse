@@ -624,18 +624,15 @@ export default function App() {
     <div style={{ minHeight: '100vh', backgroundColor: '#e5e5e5', padding: '20px 16px', fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif' }}>
       <div style={{ maxWidth: '1400px', margin: '0 auto' }}>
         <div style={{ textAlign: 'center', marginBottom: '20px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px', marginBottom: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '8px' }}>
             <img 
               src="/pulse.svg" 
-              alt="Pulse" 
-              style={{ height: '40px', width: 'auto' }}
+              alt="pulse.ai" 
+              style={{ height: '50px', width: 'auto' }}
               onError={(e) => {
                 e.target.style.display = 'none';
               }}
             />
-            <h1 style={{ fontSize: '32px', fontWeight: '700', color: '#171717', margin: 0, letterSpacing: '-0.02em' }}>
-              {activeTab === 'trends' ? '🔥 Trends' : activeTab === 'memes' ? '🐸 Memes' : 'pulse.ai'}
-          </h1>
           </div>
           <p style={{ fontSize: '12px', color: '#737373', margin: '0 0 10px' }}>
             {activeTab === 'trends' ? 'Real-time cross-platform trend detection' : activeTab === 'memes' ? 'Live from DexScreener' : 'Live prices'}

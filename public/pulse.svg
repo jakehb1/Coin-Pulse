@@ -1,5 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 100">
+  <!-- Circular logo with pulse line -->
   <circle cx="50" cy="50" r="45" fill="#171717"/>
   <path d="M30 50 L40 35 L50 55 L60 40 L70 50" stroke="#22c55e" stroke-width="6" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
   <circle cx="70" cy="50" r="4" fill="#22c55e"/>
+  
+  <!-- pulse.ai text -->
+  <text x="110" y="60" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="32" font-weight="700" fill="#171717" letter-spacing="-0.02em">pulse.ai</text>
 </svg>
