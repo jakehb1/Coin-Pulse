@@ -343,13 +343,16 @@ export default function App() {
       const timestamp = Date.now();
       lastCoinsFetchRef.current = timestamp;
       
-      const res = await fetch(`${COINGECKO_API}/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=100&page=1&sparkline=false&price_change_percentage=24h&_t=${timestamp}&nocache=${Math.random()}`, { 
+      // Use unique timestamp and random to ensure no caching
+      const uniqueId = `${timestamp}-${Math.random().toString(36).substring(7)}`;
+      const res = await fetch(`${COINGECKO_API}/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=100&page=1&sparkline=false&price_change_percentage=24h&_t=${uniqueId}`, { 
         signal: AbortSignal.timeout(20000),
         cache: 'no-store',
         headers: {
           'Cache-Control': 'no-cache, no-store, must-revalidate, max-age=0',
           'Pragma': 'no-cache',
-          'Expires': '0'
+          'Expires': '0',
+          'If-None-Match': '*'
         }
       });
       if (res.ok) {
@@ -364,17 +367,19 @@ export default function App() {
             await Promise.all(
               batch.map(async (id) => {
                 try {
-                  // Add timestamp to prevent caching
+                  // Add unique timestamp to prevent caching
                   const detailTimestamp = Date.now();
+                  const detailUniqueId = `${detailTimestamp}-${Math.random().toString(36).substring(7)}`;
                   const detailRes = await fetch(
-                    `${COINGECKO_API}/coins/${id}?localization=false&tickers=false&market_data=true&community_data=false&developer_data=false&sparkline=false&_t=${detailTimestamp}&nocache=${Math.random()}`,
+                    `${COINGECKO_API}/coins/${id}?localization=false&tickers=false&market_data=true&community_data=false&developer_data=false&sparkline=false&_t=${detailUniqueId}`,
                     { 
                       signal: AbortSignal.timeout(8000),
                       cache: 'no-store',
                       headers: {
                         'Cache-Control': 'no-cache, no-store, must-revalidate, max-age=0',
                         'Pragma': 'no-cache',
-                        'Expires': '0'
+                        'Expires': '0',
+                        'If-None-Match': '*'
                       }
                     }
                   );
@@ -404,10 +409,29 @@ export default function App() {
           const enhancedCoins = coins.map((coin, index) => {
             const supplyData = supplyDataMap.get(coin.id);
             
-            // Use actual API data - prefer detail API (more recent), fallback to markets API
-            // Detail API prices are fetched more recently and are more accurate
-            const currentPrice = supplyData?.currentPrice || coin.current_price || 0;
-            const priceChange24h = supplyData?.priceChange24h !== undefined ? supplyData.priceChange24h : coin.price_change_percentage_24h || 0;
+            // ALWAYS use fresh markets API price as base (just fetched, no cache)
+            // Only override with detail API price if it's valid and available
+            // Markets API is the source of truth since we just fetched it fresh
+            const marketsPrice = coin.current_price;
+            const detailPrice = supplyData?.currentPrice;
+            
+            // Use detail API price if available and valid, otherwise use fresh markets API price
+            // Both are fresh since we just fetched them, but detail API might be slightly more recent
+            const currentPrice = (detailPrice && detailPrice > 0 && !isNaN(detailPrice)) 
+              ? detailPrice 
+              : (marketsPrice && marketsPrice > 0 && !isNaN(marketsPrice)) 
+                ? marketsPrice 
+                : 0;
+            
+            // Same logic for 24h change
+            const marketsPriceChange = coin.price_change_percentage_24h;
+            const detailPriceChange = supplyData?.priceChange24h;
+            const priceChange24h = (detailPriceChange !== undefined && detailPriceChange !== null && !isNaN(detailPriceChange))
+              ? detailPriceChange
+              : (marketsPriceChange !== undefined && marketsPriceChange !== null && !isNaN(marketsPriceChange))
+                ? marketsPriceChange
+                : 0;
+            
             const marketCap = coin.market_cap || 0;
             
             // Get supply data from detail API (most accurate)
@@ -463,18 +487,20 @@ export default function App() {
             // Check if stablecoin
             const isStablecoin = ['usdt', 'usdc', 'dai', 'busd', 'tusd', 'usdp', 'usdd', 'frax', 'lusd', 'susd', 'gusd', 'husd', 'ousd', 'usdn', 'usdk', 'usdx', 'usd', 'ust', 'mim'].includes(coin.id?.toLowerCase() || coin.symbol?.toLowerCase() || '');
             
-            // Create updated coin object with most recent price data from detail API
+            // Create updated coin object with most recent price data
+            // Always use the validated currentPrice we calculated above
             const updatedCoin = {
               ...coin,
-              current_price: currentPrice, // Use price from detail API if available (more recent)
-              price_change_percentage_24h: priceChange24h // Use 24h change from detail API if available
+              current_price: currentPrice, // Use validated price (detail API or fresh markets API)
+              price_change_percentage_24h: priceChange24h // Use validated 24h change
             };
             
             const baseData = generateFlowData(updatedCoin, false);
             return {
               ...baseData,
-              price: currentPrice, // Ensure we use the most recent price
-              priceChange24h: priceChange24h, // Ensure we use the most recent 24h change
+              // Override price to ensure we use the validated currentPrice, not generateFlowData's fallback
+              price: currentPrice, // Always use the validated price from API
+              priceChange24h: priceChange24h, // Always use the validated 24h change from API
               fdv: fdv,
               reportedMarketCap: reportedMarketCap,
               circPercent: circPercent,
