@@ -1128,7 +1128,8 @@ export default function App() {
                       top: '2px',
                       left: filterNoise ? '22px' : '2px',
                       transition: 'left 0.2s',
-                      boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
+                      boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
+                      pointerEvents: 'none'
                     }}></div>
                   </div>
                   <span onClick={() => setFilterNoise(!filterNoise)} style={{ cursor: 'pointer' }}>Filter Noise ?</span>
@@ -1179,7 +1180,8 @@ export default function App() {
                       top: '2px',
                       left: showStablecoins ? '22px' : '2px',
                       transition: 'left 0.2s',
-                      boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
+                      boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
+                      pointerEvents: 'none'
                     }}></div>
                   </div>
                   <span onClick={() => setShowStablecoins(!showStablecoins)} style={{ cursor: 'pointer' }}>Show Stablecoins ?</span>
