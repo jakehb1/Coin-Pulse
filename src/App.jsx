@@ -407,250 +407,61 @@ export default function App() {
         } : 'No coins');
         console.log('[DEBUG] Total coins received:', coins?.length);
         if (coins?.length) {
-          // Fetch supply data for top 100 coins to ensure circ % is calculated
-          // Use detail API for more accurate supply data
-          const allCoinIds = coins.map(c => c.id);
+          // First, process coins immediately with markets API data (fast initial load)
+          // Then fetch detail data only for top 20 coins in background (for enhanced circ %)
           const supplyDataMap = new Map();
           
-          // Fetch in batches of 10 to avoid rate limits (CoinGecko allows 10-50 calls/minute)
-          // Process all coins but with proper rate limiting
-          const batchSize = 10;
-          const delayBetweenBatches = 1200; // 1.2 seconds between batches to stay under rate limit
-          
-          for (let i = 0; i < allCoinIds.length; i += batchSize) {
-            const batch = allCoinIds.slice(i, i + batchSize);
-            const batchPromises = batch.map(async (id) => {
-              try {
-                // Add unique timestamp to prevent caching
-                  const detailTimestamp = Date.now();
-                  const detailUniqueId = `${detailTimestamp}-${Math.random().toString(36).substring(7)}`;
-                  const detailUrl = typeof window !== 'undefined'
-                    ? `/api/coingecko-detail?id=${id}&_t=${detailUniqueId}&_r=${Math.random()}`
-                    : `${COINGECKO_API}/coins/${id}?localization=false&tickers=false&market_data=true&community_data=false&developer_data=false&sparkline=false&_t=${detailUniqueId}&_r=${Math.random()}`;
-                  
-                  const detailRes = await fetch(detailUrl, {
-                      signal: AbortSignal.timeout(10000), // Increased timeout
-                      cache: 'no-store',
-                      headers: {
-                        'Cache-Control': 'no-cache, no-store, must-revalidate, max-age=0',
-                        'Pragma': 'no-cache',
-                        'Expires': '0',
-                        'If-None-Match': '*',
-                        'If-Modified-Since': '0' // Prevent 304 responses
-                      }
-                    }
-                  );
-                if (detailRes.ok) {
-                  const detailData = await detailRes.json();
-                  const supplyData = {
-                    totalSupply: detailData.market_data?.total_supply,
-                    circulatingSupply: detailData.market_data?.circulating_supply,
-                    marketCap: detailData.market_data?.market_cap?.usd,
-                    // Use price from detail API as it's more recent and accurate
-                    currentPrice: detailData.market_data?.current_price?.usd,
-                    priceChange24h: detailData.market_data?.price_change_percentage_24h
-                  };
-                  supplyDataMap.set(id, supplyData);
-                  // Debug first few
-                  if (i < 3) {
-                    console.log(`[DEBUG] Detail API for ${id}:`, supplyData);
-                  }
-                  return true;
-                } else {
-                  console.warn(`[DEBUG] Detail API failed for ${id}:`, detailRes.status);
-                  return false;
-                }
-              } catch (err) {
-                console.warn(`[DEBUG] Detail API error for ${id}:`, err.message);
-                return false;
-              }
-            });
-            
-            // Wait for batch to complete
-            await Promise.all(batchPromises);
-            
-            // Add delay between batches to avoid rate limits (except for last batch)
-            if (i + batchSize < allCoinIds.length) {
-              await new Promise(resolve => setTimeout(resolve, delayBetweenBatches));
-            }
-          }
-          
-          console.log(`[DEBUG] Completed fetching detail data for ${supplyDataMap.size} coins`);
-          
-          // Store current ranks for delta calculation on next fetch
-          const currentRanks = {};
-          
-          // Process coins with enhanced data
-          const enhancedCoins = coins.map((coin, index) => {
-            const supplyData = supplyDataMap.get(coin.id);
-            
-            // ALWAYS use fresh markets API price as base (just fetched, no cache)
-            // Only override with detail API price if it's valid and available
-            // Markets API is the source of truth since we just fetched it fresh
-            const marketsPrice = coin.current_price;
-            const detailPrice = supplyData?.currentPrice;
-            
-            // Use detail API price if available and valid, otherwise use fresh markets API price
-            // Both are fresh since we just fetched them, but detail API might be slightly more recent
-            const currentPrice = (detailPrice && detailPrice > 0 && !isNaN(detailPrice)) 
-              ? detailPrice 
-              : (marketsPrice && marketsPrice > 0 && !isNaN(marketsPrice)) 
-                ? marketsPrice 
-                : 0;
-            
-            // Same logic for 24h change
-            const marketsPriceChange = coin.price_change_percentage_24h;
-            const detailPriceChange = supplyData?.priceChange24h;
-            const priceChange24h = (detailPriceChange !== undefined && detailPriceChange !== null && !isNaN(detailPriceChange))
-              ? detailPriceChange
-              : (marketsPriceChange !== undefined && marketsPriceChange !== null && !isNaN(marketsPriceChange))
-                ? marketsPriceChange
-                : 0;
-            
+          // Process coins immediately with markets API data
+          const initialCoins = coins.map((coin, index) => {
             const marketCap = coin.market_cap || 0;
+            const currentPrice = coin.current_price || 0;
+            const priceChange24h = coin.price_change_percentage_24h || 0;
             
-            // Get supply data from detail API (most accurate)
-            const circulatingSupply = supplyData?.circulatingSupply || null;
-            const totalSupply = supplyData?.totalSupply || null;
+            // Use markets API supply data (already available, no extra API call needed)
+            const circulatingSupply = coin.circulating_supply;
+            const totalSupply = coin.total_supply;
             
-            // Use market cap from detail API if available (more accurate), otherwise use markets API
-            const reportedMarketCap = supplyData?.marketCap || marketCap;
-            
-            // Calculate FDV: Fully Diluted Valuation = total_supply * current_price
-            // Only calculate if we have both total supply and current price from API
+            // Calculate FDV and circ % from markets API data
             let fdv = null;
             if (totalSupply && currentPrice) {
               fdv = totalSupply * currentPrice;
             } else if (marketCap) {
-              // Fallback: if no total supply, use market cap as FDV approximation
               fdv = marketCap;
             }
             
-            // Calculate Circ %: (circulating_supply / total_supply) * 100
-            // Using real-time data from detail API, with fallbacks to markets API
             let circPercent = null;
-            
-            // Try detail API first (most accurate) - check for valid numbers
             if (totalSupply != null && circulatingSupply != null && 
                 typeof totalSupply === 'number' && typeof circulatingSupply === 'number' &&
                 !isNaN(totalSupply) && !isNaN(circulatingSupply) &&
                 isFinite(totalSupply) && isFinite(circulatingSupply) &&
                 totalSupply > 0 && circulatingSupply > 0) {
               circPercent = (circulatingSupply / totalSupply) * 100;
-              // Debug for first coin
-              if (index === 0) {
-                console.log(`[DEBUG] Circ % from detail API for ${coin.id}:`, {
-                  circulatingSupply,
-                  totalSupply,
-                  circPercent
-                });
-              }
-            } 
-            // Fallback to markets API supply data
-            else {
-              const marketCirculating = coin.circulating_supply;
-              const marketTotal = coin.total_supply;
-              
-              if (marketCirculating != null && marketTotal != null &&
-                  typeof marketCirculating === 'number' && typeof marketTotal === 'number' &&
-                  !isNaN(marketCirculating) && !isNaN(marketTotal) &&
-                  isFinite(marketCirculating) && isFinite(marketTotal) &&
-                  marketTotal > 0 && marketCirculating > 0) {
-                circPercent = (marketCirculating / marketTotal) * 100;
-                // Debug for first coin
-                if (index === 0) {
-                  console.log(`[DEBUG] Circ % from markets API for ${coin.id}:`, {
-                    marketCirculating,
-                    marketTotal,
-                    circPercent
-                  });
-                }
-              }
-              // Last resort: calculate from market cap and price if we have total supply
-              else if (marketCap && currentPrice && currentPrice > 0 && totalSupply && totalSupply > 0) {
-                const calculatedCirculatingSupply = marketCap / currentPrice;
-                if (calculatedCirculatingSupply > 0 && totalSupply > 0) {
-                  circPercent = (calculatedCirculatingSupply / totalSupply) * 100;
-                  if (index === 0) {
-                    console.log(`[DEBUG] Circ % calculated from market cap for ${coin.id}:`, {
-                      marketCap,
-                      currentPrice,
-                      calculatedCirculatingSupply,
-                      totalSupply,
-                      circPercent
-                    });
-                  }
-                }
-              }
+              if (circPercent > 100) circPercent = 100;
             }
             
-            // Ensure circPercent is a valid number between 0 and 100
-            if (circPercent != null) {
-              if (isNaN(circPercent) || !isFinite(circPercent) || circPercent < 0) {
-                circPercent = null;
-              } else if (circPercent > 100) {
-                // Some coins have circ > total due to API inconsistencies, cap at 100
-                circPercent = 100;
-              }
-            }
-            
-            // Calculate Delta: ranking change (previous_rank - current_rank)
-            // Using real-time rank data from markets API
-            // Positive delta = moved up in ranking, negative = moved down
             const currentRank = coin.market_cap_rank || (index + 1);
-            currentRanks[coin.id] = currentRank; // Store for next comparison
-            
             const previousRank = previousRanksRef.current[coin.id];
-            
-            // Calculate delta - null if no previous rank (first load), 0 if no change, otherwise show the change
             let delta = null;
             if (previousRank !== undefined && previousRank !== null) {
-              if (previousRank !== currentRank) {
-                delta = previousRank - currentRank; // Positive = moved up, negative = moved down
-              } else {
-                delta = 0; // No change in rank
-              }
+              delta = previousRank !== currentRank ? previousRank - currentRank : 0;
             }
-            // If no previous rank (first load), delta stays null (will show "-")
             
-            // Check if stablecoin
             const isStablecoin = ['usdt', 'usdc', 'dai', 'busd', 'tusd', 'usdp', 'usdd', 'frax', 'lusd', 'susd', 'gusd', 'husd', 'ousd', 'usdn', 'usdk', 'usdx', 'usd', 'ust', 'mim'].includes(coin.id?.toLowerCase() || coin.symbol?.toLowerCase() || '');
             
-            // Create updated coin object with most recent price data
-            // Always use the validated currentPrice we calculated above
             const updatedCoin = {
               ...coin,
-              current_price: currentPrice, // Use validated price (detail API or fresh markets API)
-              price_change_percentage_24h: priceChange24h // Use validated 24h change
+              current_price: currentPrice,
+              price_change_percentage_24h: priceChange24h
             };
             
             const baseData = generateFlowData(updatedCoin, false);
             
-            // Debug logging for first few coins
-            if (index < 5) {
-              console.log(`[DEBUG] Coin ${index + 1} - ${coin.id}:`, {
-                marketsPrice,
-                detailPrice,
-                currentPrice,
-                circulatingSupply: supplyData?.circulatingSupply,
-                totalSupply: supplyData?.totalSupply,
-                coinCirculatingSupply: coin.circulating_supply,
-                coinTotalSupply: coin.total_supply,
-                circPercent,
-                previousRank,
-                currentRank,
-                delta,
-                hasSupplyData: !!supplyData
-              });
-            }
-            
             return {
               ...baseData,
-              // Override price to ensure we use the validated currentPrice, not generateFlowData's fallback
-              price: currentPrice, // Always use the validated price from API
-              priceChange24h: priceChange24h, // Always use the validated 24h change from API
+              price: currentPrice,
+              priceChange24h: priceChange24h,
               fdv: fdv,
-              reportedMarketCap: reportedMarketCap,
+              reportedMarketCap: marketCap,
               circPercent: circPercent,
               rank: currentRank,
               delta: delta,
@@ -658,25 +469,120 @@ export default function App() {
             };
           });
           
-          // Update previous ranks for next delta calculation
-          // Only update if we have data, otherwise keep existing ranks
+          // Set data immediately for fast initial render
+          setData(initialCoins);
+          setLastUpdated(new Date());
+          
+          // Store ranks for next delta calculation
+          const currentRanks = {};
+          initialCoins.forEach(coin => {
+            if (coin.rank) currentRanks[coin.id] = coin.rank;
+          });
           if (Object.keys(currentRanks).length > 0) {
             previousRanksRef.current = currentRanks;
           }
           
-          console.log('[DEBUG] Updated previousRanksRef:', previousRanksRef.current);
-          console.log('[DEBUG] Enhanced coins sample:', enhancedCoins.slice(0, 3).map(c => ({
-            id: c.id,
-            name: c.name,
-            price: c.price,
-            circPercent: c.circPercent,
-            delta: c.delta,
-            rank: c.rank
-          })));
-          console.log('[DEBUG] Supply data map size:', supplyDataMap.size);
+          // Fetch detail data only for top 20 coins in background (optional enhancement)
+          // This improves circ % accuracy but doesn't block initial render
+          const topCoinIds = coins.slice(0, 20).map(c => c.id);
+          const batchSize = 10;
+          const delayBetweenBatches = 600; // Reduced to 0.6 seconds for faster background updates
           
-          setData(enhancedCoins);
-          setLastUpdated(new Date());
+          // Run in background without blocking
+          (async () => {
+            for (let i = 0; i < topCoinIds.length; i += batchSize) {
+              const batch = topCoinIds.slice(i, i + batchSize);
+              const batchPromises = batch.map(async (id) => {
+                try {
+                  const detailTimestamp = Date.now();
+                  const detailUniqueId = `${detailTimestamp}-${Math.random().toString(36).substring(7)}`;
+                  const detailUrl = typeof window !== 'undefined'
+                    ? `/api/coingecko-detail?id=${id}&_t=${detailUniqueId}&_r=${Math.random()}`
+                    : `${COINGECKO_API}/coins/${id}?localization=false&tickers=false&market_data=true&community_data=false&developer_data=false&sparkline=false&_t=${detailUniqueId}&_r=${Math.random()}`;
+                  
+                  const detailRes = await fetch(detailUrl, {
+                    signal: AbortSignal.timeout(8000),
+                    cache: 'no-store',
+                    headers: {
+                      'Cache-Control': 'no-cache, no-store, must-revalidate, max-age=0',
+                      'Pragma': 'no-cache',
+                      'Expires': '0'
+                    }
+                  });
+                  
+                  if (detailRes.ok) {
+                    const detailData = await detailRes.json();
+                    const supplyData = {
+                      totalSupply: detailData.market_data?.total_supply,
+                      circulatingSupply: detailData.market_data?.circulating_supply,
+                      marketCap: detailData.market_data?.market_cap?.usd,
+                      currentPrice: detailData.market_data?.current_price?.usd,
+                      priceChange24h: detailData.market_data?.price_change_percentage_24h
+                    };
+                    supplyDataMap.set(id, supplyData);
+                    return true;
+                  }
+                  return false;
+                } catch (err) {
+                  return false;
+                }
+              });
+              
+              await Promise.all(batchPromises);
+              
+              if (i + batchSize < topCoinIds.length) {
+                await new Promise(resolve => setTimeout(resolve, delayBetweenBatches));
+              }
+            }
+            
+            // Update coins with enhanced detail data if available
+            if (supplyDataMap.size > 0) {
+              setData(prevData => prevData.map(coin => {
+                const supplyData = supplyDataMap.get(coin.id);
+                if (!supplyData) return coin;
+                
+                // Use detail API data if more accurate
+                const detailPrice = supplyData.currentPrice;
+                const detailPriceChange = supplyData.priceChange24h;
+                const detailCircSupply = supplyData.circulatingSupply;
+                const detailTotalSupply = supplyData.totalSupply;
+                
+                const finalPrice = (detailPrice && detailPrice > 0 && !isNaN(detailPrice)) 
+                  ? detailPrice 
+                  : coin.price;
+                
+                const finalPriceChange = (detailPriceChange !== undefined && detailPriceChange !== null && !isNaN(detailPriceChange))
+                  ? detailPriceChange
+                  : coin.priceChange24h;
+                
+                let fdv = coin.fdv;
+                if (detailTotalSupply && finalPrice) {
+                  fdv = detailTotalSupply * finalPrice;
+                }
+                
+                let circPercent = coin.circPercent;
+                if (detailTotalSupply != null && detailCircSupply != null && 
+                    typeof detailTotalSupply === 'number' && typeof detailCircSupply === 'number' &&
+                    !isNaN(detailTotalSupply) && !isNaN(detailCircSupply) &&
+                    isFinite(detailTotalSupply) && isFinite(detailCircSupply) &&
+                    detailTotalSupply > 0 && detailCircSupply > 0) {
+                  circPercent = (detailCircSupply / detailTotalSupply) * 100;
+                  if (circPercent > 100) circPercent = 100;
+                }
+                
+                return {
+                  ...coin,
+                  price: finalPrice,
+                  priceChange24h: finalPriceChange,
+                  fdv: fdv,
+                  circPercent: circPercent,
+                  reportedMarketCap: supplyData.marketCap || coin.reportedMarketCap
+                };
+              }));
+            }
+          })();
+          
+          console.log(`[DEBUG] Initial coins loaded, fetching detail data for top ${topCoinIds.length} coins in background`);
           return;
         }
       }
@@ -973,9 +879,56 @@ export default function App() {
           ? aVal - bVal
           : bVal - aVal;
       });
-    } else {
-      // Default sort for memes
-      d.sort((a, b) => b.signalScore - a.signalScore);
+    } else if (activeTab === 'memes') {
+      // Sorting for memes
+      d.sort((a, b) => {
+        let aVal, bVal;
+        switch (sortColumn) {
+          case 'name':
+            aVal = (a.name || '').toLowerCase();
+            bVal = (b.name || '').toLowerCase();
+            break;
+          case 'price':
+            aVal = a.price || 0;
+            bVal = b.price || 0;
+            break;
+          case 'priceChange24h':
+            aVal = a.priceChange24h || 0;
+            bVal = b.priceChange24h || 0;
+            break;
+          case 'volume24h':
+            aVal = a.volume24h || 0;
+            bVal = b.volume24h || 0;
+            break;
+          case 'marketCap':
+            aVal = a.marketCap || 0;
+            bVal = b.marketCap || 0;
+            break;
+          case 'viralScore':
+            aVal = a.viralScore || 0;
+            bVal = b.viralScore || 0;
+            break;
+          case 'signalScore':
+            aVal = a.signalScore || 0;
+            bVal = b.signalScore || 0;
+            break;
+          default:
+            // Default to signalScore if no sort column set
+            aVal = a.signalScore || 0;
+            bVal = b.signalScore || 0;
+            break;
+        }
+        
+        if (typeof aVal === 'string') {
+          return sortDirection === 'asc' 
+            ? aVal.localeCompare(bVal)
+            : bVal.localeCompare(aVal);
+        }
+        
+        return sortDirection === 'asc' 
+          ? aVal - bVal
+          : bVal - aVal;
+      });
     }
     
     return d;
@@ -1080,7 +1033,18 @@ export default function App() {
 
         <div style={{ display: 'flex', justifyContent: 'center', gap: '6px', marginBottom: '16px', flexWrap: 'wrap' }}>
           {[['trends', '🔥 Trends'], ['all', '📊 Coins'], ['memes', '🐸 Memes']].map(([key, label]) => (
-            <button key={key} onClick={() => { setActiveTab(key); setSearchQuery(''); }} style={{ padding: '10px 16px', borderRadius: '10px', border: '1px solid #e5e5e5', background: activeTab === key ? '#171717' : 'white', color: activeTab === key ? 'white' : '#525252', fontSize: '13px', cursor: 'pointer', fontWeight: '500' }}>{label}</button>
+            <button key={key} onClick={() => { 
+              setActiveTab(key); 
+              setSearchQuery(''); 
+              // Reset sort based on tab
+              if (key === 'all') {
+                setSortColumn('rank');
+                setSortDirection('asc');
+              } else if (key === 'memes') {
+                setSortColumn('signalScore');
+                setSortDirection('desc');
+              }
+            }} style={{ padding: '10px 16px', borderRadius: '10px', border: '1px solid #e5e5e5', background: activeTab === key ? '#171717' : 'white', color: activeTab === key ? 'white' : '#525252', fontSize: '13px', cursor: 'pointer', fontWeight: '500' }}>{label}</button>
           ))}
         </div>
 
@@ -1089,14 +1053,21 @@ export default function App() {
             <div style={{ display: 'flex', gap: '24px', alignItems: 'center', flexWrap: 'wrap', width: '100%' }}>
               {/* Filter Noise Toggle */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                <div style={{ 
-                  display: 'flex', 
-                  alignItems: 'center', 
-                  gap: '8px', 
-                  cursor: 'pointer',
-                  fontSize: '14px',
-                  color: '#525252'
-                }}>
+                <div 
+                  style={{ 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    gap: '8px', 
+                    cursor: 'pointer',
+                    fontSize: '14px',
+                    color: '#525252'
+                  }}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setFilterNoise(!filterNoise);
+                  }}
+                >
                   <div 
                     style={{
                       width: '44px',
@@ -1106,9 +1077,14 @@ export default function App() {
                       position: 'relative',
                       transition: 'background-color 0.2s',
                       cursor: 'pointer',
-                      flexShrink: 0
+                      flexShrink: 0,
+                      userSelect: 'none'
                     }} 
-                    onClick={() => setFilterNoise(!filterNoise)}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setFilterNoise(!filterNoise);
+                    }}
                     role="switch"
                     aria-checked={filterNoise}
                     tabIndex={0}
@@ -1132,7 +1108,7 @@ export default function App() {
                       pointerEvents: 'none'
                     }}></div>
                   </div>
-                  <span onClick={() => setFilterNoise(!filterNoise)} style={{ cursor: 'pointer' }}>Filter Noise ?</span>
+                  <span style={{ cursor: 'pointer', userSelect: 'none' }}>Filter Noise ?</span>
                 </div>
                 <span style={{ fontSize: '12px', color: '#737373', marginLeft: '52px' }}>
                   {hiddenByNoise} hidden
@@ -1141,14 +1117,21 @@ export default function App() {
 
               {/* Show Stablecoins Toggle */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                <div style={{ 
-                  display: 'flex', 
-                  alignItems: 'center', 
-                  gap: '8px', 
-                  cursor: 'pointer',
-                  fontSize: '14px',
-                  color: '#525252'
-                }}>
+                <div 
+                  style={{ 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    gap: '8px', 
+                    cursor: 'pointer',
+                    fontSize: '14px',
+                    color: '#525252'
+                  }}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setShowStablecoins(!showStablecoins);
+                  }}
+                >
                   <div 
                     style={{
                       width: '44px',
@@ -1158,9 +1141,14 @@ export default function App() {
                       position: 'relative',
                       transition: 'background-color 0.2s',
                       cursor: 'pointer',
-                      flexShrink: 0
+                      flexShrink: 0,
+                      userSelect: 'none'
                     }} 
-                    onClick={() => setShowStablecoins(!showStablecoins)}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setShowStablecoins(!showStablecoins);
+                    }}
                     role="switch"
                     aria-checked={showStablecoins}
                     tabIndex={0}
@@ -1184,7 +1172,7 @@ export default function App() {
                       pointerEvents: 'none'
                     }}></div>
                   </div>
-                  <span onClick={() => setShowStablecoins(!showStablecoins)} style={{ cursor: 'pointer' }}>Show Stablecoins ?</span>
+                  <span style={{ cursor: 'pointer', userSelect: 'none' }}>Show Stablecoins ?</span>
                 </div>
                 <span style={{ fontSize: '12px', color: '#737373', marginLeft: '52px' }}>
                   {hiddenByStablecoins} hidden
@@ -1745,39 +1733,270 @@ export default function App() {
         )}
 
         {activeTab === 'memes' && (
-          <div style={{ backgroundColor: 'white', borderRadius: '14px', border: '1px solid #e5e5e5', overflow: 'hidden' }}>
+          <div style={{ backgroundColor: 'white', borderRadius: '12px', border: '1px solid #e5e5e5', overflow: 'visible', position: 'relative' }}>
             {loading && !currentData.length ? <div style={{ padding: '50px', textAlign: 'center', color: '#737373' }}>Loading...</div> : (
-              <div style={{ overflowX: 'auto' }}>
-                <div style={{ minWidth: '700px' }}>
-                  <div style={{ display: 'grid', gridTemplateColumns: '45px 2fr 1fr 1fr 1fr 1fr 0.8fr', padding: '10px 14px', backgroundColor: '#fafafa', borderBottom: '1px solid #e5e5e5', fontSize: '10px', fontWeight: '600', color: '#737373', textTransform: 'uppercase' }}>
-                    <div>#</div><div>Token</div><div style={{ textAlign: 'right' }}>Price</div><div style={{ textAlign: 'right' }}>24h</div><div style={{ textAlign: 'right' }}>Vol</div><div style={{ textAlign: 'right' }}>MCap</div><div style={{ textAlign: 'center' }}>Score</div>
+              <div style={{ overflowX: 'auto', WebkitOverflowScrolling: 'touch', position: 'relative' }}>
+                <table className="table-responsive" style={{ width: '100%', borderCollapse: 'collapse', minWidth: '700px' }}>
+                  <thead>
+                    <tr style={{ backgroundColor: '#fafafa', borderBottom: '1px solid #e5e5e5' }}>
+                      <th style={{ padding: '12px 16px', textAlign: 'left', fontSize: '11px', fontWeight: '600', color: '#737373', textTransform: 'uppercase', letterSpacing: '0.05em', width: '60px' }}>#</th>
+                      <th 
+                        onClick={() => handleSort('name')}
+                        style={{ 
+                          padding: '12px 16px', 
+                          textAlign: 'left', 
+                          fontSize: '11px', 
+                          fontWeight: '600', 
+                          color: '#737373', 
+                          textTransform: 'uppercase', 
+                          letterSpacing: '0.05em',
+                          cursor: 'pointer',
+                          userSelect: 'none',
+                          transition: 'background-color 0.2s'
+                        }}
+                        onMouseEnter={(e) => e.target.style.backgroundColor = '#f0f0f0'}
+                        onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}
+                      >
+                        TOKEN {getSortIcon('name')}
+                      </th>
+                      <th 
+                        onClick={() => handleSort('price')}
+                        style={{ 
+                          padding: '12px 16px', 
+                          textAlign: 'right', 
+                          fontSize: '11px', 
+                          fontWeight: '600', 
+                          color: '#737373', 
+                          textTransform: 'uppercase', 
+                          letterSpacing: '0.05em',
+                          cursor: 'pointer',
+                          userSelect: 'none',
+                          transition: 'background-color 0.2s'
+                        }}
+                        onMouseEnter={(e) => e.target.style.backgroundColor = '#f0f0f0'}
+                        onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}
+                      >
+                        PRICE {getSortIcon('price')}
+                      </th>
+                      <th 
+                        onClick={() => handleSort('priceChange24h')}
+                        style={{ 
+                          padding: '12px 16px', 
+                          textAlign: 'right', 
+                          fontSize: '11px', 
+                          fontWeight: '600', 
+                          color: '#737373', 
+                          textTransform: 'uppercase', 
+                          letterSpacing: '0.05em',
+                          cursor: 'pointer',
+                          userSelect: 'none',
+                          transition: 'background-color 0.2s'
+                        }}
+                        onMouseEnter={(e) => e.target.style.backgroundColor = '#f0f0f0'}
+                        onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}
+                      >
+                        24H % {getSortIcon('priceChange24h')}
+                      </th>
+                      <th 
+                        onClick={() => handleSort('volume24h')}
+                        style={{ 
+                          padding: '12px 16px', 
+                          textAlign: 'right', 
+                          fontSize: '11px', 
+                          fontWeight: '600', 
+                          color: '#737373', 
+                          textTransform: 'uppercase', 
+                          letterSpacing: '0.05em',
+                          cursor: 'pointer',
+                          userSelect: 'none',
+                          transition: 'background-color 0.2s'
+                        }}
+                        onMouseEnter={(e) => e.target.style.backgroundColor = '#f0f0f0'}
+                        onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}
+                      >
+                        VOL {getSortIcon('volume24h')}
+                      </th>
+                      <th 
+                        onClick={() => handleSort('marketCap')}
+                        style={{ 
+                          padding: '12px 16px', 
+                          textAlign: 'right', 
+                          fontSize: '11px', 
+                          fontWeight: '600', 
+                          color: '#737373', 
+                          textTransform: 'uppercase', 
+                          letterSpacing: '0.05em',
+                          cursor: 'pointer',
+                          userSelect: 'none',
+                          transition: 'background-color 0.2s'
+                        }}
+                        onMouseEnter={(e) => e.target.style.backgroundColor = '#f0f0f0'}
+                        onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}
+                      >
+                        MCAP {getSortIcon('marketCap')}
+                      </th>
+                      <th 
+                        onClick={() => handleSort('viralScore')}
+                        style={{ 
+                          padding: '12px 16px', 
+                          textAlign: 'center', 
+                          fontSize: '11px', 
+                          fontWeight: '600', 
+                          color: '#737373', 
+                          textTransform: 'uppercase', 
+                          letterSpacing: '0.05em',
+                          cursor: 'pointer',
+                          userSelect: 'none',
+                          transition: 'background-color 0.2s'
+                        }}
+                        onMouseEnter={(e) => e.target.style.backgroundColor = '#f0f0f0'}
+                        onMouseLeave={(e) => e.target.style.backgroundColor = 'transparent'}
+                      >
+                        SCORE {getSortIcon('viralScore')}
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredData.map((t, i) => {
+                      const viral = getViralLabel(t.viralScore);
+                      const chain = getChainBadge(t.chain);
+                      return (
+                        <tr 
+                          key={t.id + i} 
+                          style={{ 
+                            borderBottom: '1px solid #f5f5f5',
+                            transition: 'background-color 0.1s'
+                          }}
+                          onMouseEnter={(e) => e.currentTarget.style.backgroundColor = '#fafafa'}
+                          onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                        >
+                          <td style={{ padding: '16px', fontSize: '13px', color: '#737373' }}>{i + 1}</td>
+                          <td style={{ padding: '16px' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                              {t.image ? (
+                                <img 
+                                  src={t.image} 
+                                  alt={t.name}
+                                  style={{ 
+                                    width: '32px', 
+                                    height: '32px', 
+                                    borderRadius: '50%' 
+                                  }}
+                                  onError={(e) => {
+                                    e.target.style.display = 'none';
+                                    e.target.nextSibling.style.display = 'flex';
+                                  }}
+                                />
+                              ) : null}
+                              <div style={{
+                                width: '32px',
+                                height: '32px',
+                                borderRadius: '50%',
+                                backgroundColor: '#f3f4f6',
+                                display: t.image ? 'none' : 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                fontSize: '14px',
+                                fontWeight: '600',
+                                color: '#6b7280'
+                              }}>
+                                {t.symbol?.[0] || t.name?.[0] || '?'}
+                              </div>
+                              <div>
+                                <div style={{ 
+                                  fontWeight: '600', 
+                                  color: '#171717', 
+                                  fontSize: '14px',
+                                  marginBottom: '2px',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '4px'
+                                }}>
+                                  {t.name}
+                                  {t.chain && (
+                                    <span style={{ 
+                                      backgroundColor: chain.b, 
+                                      color: chain.c, 
+                                      padding: '2px 6px', 
+                                      borderRadius: '4px', 
+                                      fontSize: '9px', 
+                                      fontWeight: '600' 
+                                    }}>
+                                      {chain.l}
+                                    </span>
+                                  )}
+                                </div>
+                                <div style={{ 
+                                  fontSize: '12px', 
+                                  color: '#737373' 
+                                }}>
+                                  {t.symbol}
+                                </div>
+                              </div>
+                            </div>
+                          </td>
+                          <td style={{ 
+                            padding: '16px', 
+                            textAlign: 'right', 
+                            fontWeight: '500', 
+                            fontSize: '14px',
+                            color: '#171717',
+                            fontFamily: 'monospace'
+                          }}>
+                            {formatPrice(t.price)}
+                          </td>
+                          <td style={{ 
+                            padding: '16px', 
+                            textAlign: 'right', 
+                            fontWeight: '500', 
+                            fontSize: '14px',
+                            color: t.priceChange24h >= 0 ? '#22c55e' : '#ef4444'
+                          }}>
+                            {formatPercent(t.priceChange24h)}
+                          </td>
+                          <td style={{ 
+                            padding: '16px', 
+                            textAlign: 'right',
+                            fontSize: '13px',
+                            color: '#525252'
+                          }}>
+                            {formatLargeNumber(t.volume24h)}
+                          </td>
+                          <td style={{ 
+                            padding: '16px', 
+                            textAlign: 'right',
+                            fontSize: '13px',
+                            color: '#525252'
+                          }}>
+                            {formatLargeNumber(t.marketCap)}
+                          </td>
+                          <td style={{ padding: '16px', textAlign: 'center' }}>
+                            <span style={{ 
+                              backgroundColor: viral.bg, 
+                              color: viral.color, 
+                              padding: '4px 8px', 
+                              borderRadius: '4px', 
+                              fontSize: '10px', 
+                              fontWeight: '600' 
+                            }}>
+                              {viral.label}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                
+                {filteredData.length === 0 && (
+                  <div style={{ padding: '40px', textAlign: 'center', color: '#737373' }}>
+                    {searchQuery.trim() ? (
+                      searchLoading ? 'Searching...' : 'No results found. Try a different search term.'
+                    ) : (
+                      'No memes found.'
+                    )}
                   </div>
-                  {filteredData.map((t, i) => {
-                    const isLastItem = i === filteredData.length - 1 && !searchQuery.trim();
-                    const viral = getViralLabel(t.viralScore);
-                    const chain = getChainBadge(t.chain);
-                    return (
-                      <div key={t.id + i} style={{ display: 'grid', gridTemplateColumns: '45px 2fr 1fr 1fr 1fr 1fr 0.8fr', padding: '12px 14px', borderBottom: '1px solid #f5f5f5', alignItems: 'center', fontSize: '13px' }}>
-                        <div style={{ color: '#a3a3a3', fontSize: '11px' }}>{i + 1}</div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          {t.image ? <img src={t.image} alt="" style={{ width: '26px', height: '26px', borderRadius: '50%' }} onError={e => e.target.style.display='none'} /> : <div style={{ width: '26px', height: '26px', borderRadius: '50%', backgroundColor: '#f0f0f0', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: '600' }}>{t.symbol?.[0]}</div>}
-                          <div>
-                            <div style={{ fontWeight: '600', color: '#171717', fontSize: '13px', display: 'flex', alignItems: 'center', gap: '4px' }}>{t.name?.slice(0, 14)}{t.chain && <span style={{ backgroundColor: chain.b, color: chain.c, padding: '1px 4px', borderRadius: '3px', fontSize: '8px', fontWeight: '600' }}>{chain.l}</span>}</div>
-                            <div style={{ fontSize: '10px', color: '#a3a3a3' }}>{t.symbol}</div>
-                          </div>
-                        </div>
-                        <div style={{ textAlign: 'right', fontWeight: '600', fontFamily: 'monospace', fontSize: '12px' }}>{formatPrice(t.price)}</div>
-                        <div style={{ textAlign: 'right', fontWeight: '600', color: t.priceChange24h >= 0 ? '#16a34a' : '#dc2626', fontSize: '12px' }}>{formatPercent(t.priceChange24h)}</div>
-                        <div style={{ textAlign: 'right', fontSize: '11px', color: '#525252' }}>{formatLargeNumber(t.volume24h)}</div>
-                        <div style={{ textAlign: 'right', fontSize: '11px', color: '#525252' }}>{formatLargeNumber(t.marketCap)}</div>
-                        <div style={{ textAlign: 'center' }}>
-                          <span style={{ backgroundColor: viral.bg, color: viral.color, padding: '3px 6px', borderRadius: '4px', fontSize: '9px', fontWeight: '600' }}>{viral.label}</span>
-                        </div>
-                      </div>
-                    );
-                  })}
-                  
-                </div>
+                )}
               </div>
             )}
           </div>
